@@ -33,6 +33,7 @@ redis_client = redis.from_url(redis_url) if redis_url else None
 # Stripe setup
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')
+PAYSTACK_SECRET = os.environ.get('PAYSTACK_SECRET_KEY')
 
 # Google OAuth setup
 oauth = OAuth(app)
