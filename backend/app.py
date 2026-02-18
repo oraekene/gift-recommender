@@ -341,7 +341,11 @@ class KimiClient:
             if 'choices' in data and len(data['choices']) > 0:
                 return data['choices'][0]['message']['content']
             return "{}"
-        except:
+        except requests.exceptions.Timeout:
+            print("❌ Kimi API timeout")
+            return "{}"
+        except Exception as e:
+            print(f"❌ Kimi API Error: {e}")
             return "{}"
 
 # Paystack helpers
