@@ -10,30 +10,43 @@ import re
 import time
 import requests
 import uuid
+import hmac
+import hashlib
+from cryptography.fernet import Fernet
 import stripe
 from authlib.integrations.flask_client import OAuth
 import redis
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///gifts.db')
+# app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
+# app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///gifts.db')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'jwt-secret-change-in-production')
+# app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'jwt-secret-change-in-production')
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=7)
 
 # Initialize extensions
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
-CORS(app, origins=[os.environ.get('FRONTEND_URL', 'http://localhost:5173')], supports_credentials=True)
+# CORS(app, origins=[os.environ.get('FRONTEND_URL', 'http://localhost:5173')], supports_credentials=True)
+CORS(app, origins=[os.environ.get('FRONTEND_URL')], supports_credentials=True)
 
 # Redis for rate limiting and caching
 redis_url = os.environ.get('REDIS_URL')
 redis_client = redis.from_url(redis_url) if redis_url else None
 
+# Encryption
+cipher_suite = Fernet(os.environ.get('ENCRYPTION_KEY'))
+
 # Stripe setup
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')
+
+# Paystack config
 PAYSTACK_SECRET = os.environ.get('PAYSTACK_SECRET_KEY')
+PAYSTACK_BASE_URL = "https://api.paystack.co"
 
 # Cloudflare R2 Configuration
 R2_ENDPOINT = os.environ.get('R2_ENDPOINT')  # https://<account-id>.r2.cloudflarestorage.com
@@ -173,6 +186,10 @@ class User(db.Model):
     # API Keys (encrypted)
     brave_api_key = db.Column(db.Text)
     gemini_api_key = db.Column(db.Text)
+
+    # Paystack
+    paystack_customer_code = db.Column(db.String(255))
+    paystack_subscription_code = db.Column(db.String(255))
     
     # Stripe
     stripe_customer_id = db.Column(db.String(255))
@@ -274,38 +291,100 @@ class BraveSearch:
             print(f"Search error: {e}")
             return []
 
-class GeminiClient:
+# class GeminiClient:
+    # def __init__(self, api_key):
+        # self.api_key = api_key
+        # self.url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        
+    # def generate(self, prompt):
+        # time.sleep(0.5)  # Rate limiting
+        # data = {
+            # "contents": [{"parts": [{"text": prompt}]}],
+            # "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} 
+                              # for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+                                       # "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
+        # }
+        # try:
+            # response = requests.post(self.url, headers={'Content-Type': 'application/json'}, 
+                                   # json=data, timeout=30)
+            # if response.status_code == 200 and 'candidates' in response.json():
+                # return response.json()['candidates'][0]['content']['parts'][0]['text']
+            # return "{}"
+        # except Exception as e:
+            # print(f"Gemini error: {e}")
+            # return "{}"
+
+class KimiClient:
     def __init__(self, api_key):
         self.api_key = api_key
-        self.url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        self.invoke_url = "https://integrate.api.nvidia.com/v1/chat/completions"
         
     def generate(self, prompt):
-        time.sleep(0.5)  # Rate limiting
-        data = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} 
-                              for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
-                                       "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json"
+        }
+        payload = {
+            "model": "moonshotai/kimi-k2.5",
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 4096,
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "stream": False,
+            "chat_template_kwargs": {"thinking": False}
         }
         try:
-            response = requests.post(self.url, headers={'Content-Type': 'application/json'}, 
-                                   json=data, timeout=30)
-            if response.status_code == 200 and 'candidates' in response.json():
-                return response.json()['candidates'][0]['content']['parts'][0]['text']
+            response = requests.post(self.invoke_url, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            if 'choices' in data and len(data['choices']) > 0:
+                return data['choices'][0]['message']['content']
             return "{}"
-        except Exception as e:
-            print(f"Gemini error: {e}")
+        except:
             return "{}"
 
+# Paystack helpers
+def paystack_request(method, endpoint, data=None):
+    headers = {
+        'Authorization': f'Bearer {PAYSTACK_SECRET}',
+        'Content-Type': 'application/json'
+    }
+    url = f"{PAYSTACK_BASE_URL}/{endpoint}"
+    if method == 'GET':
+        response = requests.get(url, headers=headers)
+    elif method == 'POST':
+        response = requests.post(url, headers=headers, json=data)
+    return response.json()
+
+def create_paystack_customer(email, first_name, last_name):
+    data = {'email': email, 'first_name': first_name, 'last_name': last_name}
+    result = paystack_request('POST', 'customer', data)
+    return result.get('data', {}).get('customer_code')
+
+def initialize_transaction(email, amount_kobo, plan_code=None, callback_url=None):
+    data = {
+        'email': email,
+        'amount': amount_kobo,
+        'callback_url': callback_url or os.environ.get('FRONTEND_URL') + '/settings?success=true'
+    }
+    if plan_code:
+        data['plan'] = plan_code
+    result = paystack_request('POST', 'transaction/initialize', data)
+    return result.get('data', {}).get('authorization_url')
+
 class PainPointAnalyzer:
-    def __init__(self, gemini_key):
-        self.gemini = GeminiClient(gemini_key)
+    # def __init__(self, gemini_key):
+        # self.gemini = GeminiClient(gemini_key)
+
+    def __init__(self, api_key):
+        self.kimi = KimiClient(api_key)
         
     def analyze(self, chat_text, recipient):
         prompt = f"""Analyze this chat for pain points experienced by {recipient}.
 Return JSON array with fields: pain_point (string), score (1-10), category (Physical/Emotional/Practical), trigger_text (exact quote), context (brief).
 Chat: {chat_text[:4000]}"""
-        resp = self.gemini.generate(prompt)
+        # resp = self.gemini.generate(prompt)
+        resp = self.kimi.generate(prompt)
         try:
             match = re.search(r'\[.*\]', resp.replace("\n", " "), re.DOTALL)
             return json.loads(match.group(0)) if match else []
@@ -314,14 +393,17 @@ Chat: {chat_text[:4000]}"""
             return []
 
 class ShoppingAgent:
-    def __init__(self, gemini_key, brave_key):
-        self.gemini = GeminiClient(gemini_key)
+    # def __init__(self, gemini_key, brave_key):
+        # self.gemini = GeminiClient(gemini_key)
+    def __init__(self, api_key, brave_key):
+        self.kimi = KimiClient(api_key)
         self.search = BraveSearch(brave_key)
         
     def brainstorm(self, pain_point, location):
         prompt = f"""Pain: "{pain_point}". Suggest 3 broad product categories (2-3 words each): practical, splurge, thoughtful.
-Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}"""
-        resp = self.gemini.generate(prompt)
+Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}
+        # resp = self.gemini.generate(prompt)
+        resp = self.kimi.generate(prompt)
         try:
             match = re.search(r'\{.*\}', resp.replace("\n", " "), re.DOTALL)
             return json.loads(match.group(0)) if match else {"practical": pain_point + " solution"}
@@ -331,7 +413,8 @@ Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}"""
     def vet(self, item, results, budget, currency, location):
         prompt = f"""Select best product under {budget} {currency} in {location} from these {len(results)} results: {json.dumps(results[:3])}.
 Return JSON: {{"product": "Name", "price_guess": "50", "url": "link", "reason": "Why fits"}} or {{}} if over budget."""
-        resp = self.gemini.generate(prompt)
+        # resp = self.gemini.generate(prompt)
+        resp = self.kimi.generate(prompt)
         try:
             match = re.search(r'\{.*\}', resp.replace("\n", " "), re.DOTALL)
             rec = json.loads(match.group(0)) if match else {}
@@ -411,20 +494,30 @@ def user_keys():
     if request.method == 'GET':
         # Return masked keys
         brave_masked = '••••' + decrypt_key(user.brave_api_key)[-4:] if user.brave_api_key else None
-        gemini_masked = '••••' + decrypt_key(user.gemini_api_key)[-4:] if user.gemini_api_key else None
+        # gemini_masked = '••••' + decrypt_key(user.gemini_api_key)[-4:] if user.gemini_api_key else None
+        nvidia_masked = '••••' + decrypt_key(user.nvidia_api_key)[-4:] if user.nvidia_api_key else None
         
         return jsonify({
             'brave_api_key': brave_masked,
-            'gemini_api_key': gemini_masked,
-            'has_keys': bool(user.brave_api_key and user.gemini_api_key)
+            # 'gemini_api_key': gemini_masked,
+            # 'has_keys': bool(user.brave_api_key and user.gemini_api_key
+            'nvidia_api_key': nvidia_masked,
+            'has_keys': bool(user.brave_api_key and user.nvidia_api_key)
         })
     
     # POST - update keys
     data = request.get_json()
     brave_key = data.get('brave_api_key', '').strip()
-    gemini_key = data.get('gemini_api_key', '').strip()
+    # gemini_key = data.get('gemini_api_key', '').strip()
+    nvidia_key = data.get('nvidia_api_key', '').strip()
     
-    # Validate keys
+    # Validate keys    
+    if nvidia_key:
+        test_client = KimiClient(nvidia_key)
+        test_resp = test_client.generate("Say 'test'")
+        if not test_resp or test_resp == "{}":
+            return jsonify({'error': 'Invalid NVIDIA API key'}), 400
+    
     if brave_key:
         test = BraveSearch(brave_key)
         if not test.search("test", 1):
@@ -432,8 +525,10 @@ def user_keys():
     
     if brave_key:
         user.brave_api_key = encrypt_key(brave_key)
-    if gemini_key:
-        user.gemini_api_key = encrypt_key(gemini_key)
+    # if gemini_key:
+        # user.gemini_api_key = encrypt_key(gemini_key)
+    if nvidia_key:
+        user.nvidia_api_key = encrypt_key(nvidia_key)
     
     db.session.commit()
     return jsonify({'success': True})
@@ -497,7 +592,8 @@ def analyze():
         return jsonify({'error': 'No pain points detected'}), 400
     
     # Phase 2: Shopping
-    shopper = ShoppingAgent(gemini_key, brave_key)
+    # shopper = ShoppingAgent(gemini_key, brave_key)
+    shopper = ShoppingAgent(nvidia_key, brave_key)
     gifts = []
     total_searches = 0
     
@@ -809,6 +905,69 @@ def stripe_webhook():
         customer_id = subscription['customer']
         
         user = User.query.filter_by(stripe_customer_id=customer_id).first()
+        if user:
+            user.subscription_status = 'canceled'
+            user.subscription_tier = 'free'
+            db.session.commit()
+    
+    return jsonify({'status': 'success'})
+
+@app.route('/api/paystack/initialize', methods=['POST'])
+@jwt_required()
+def paystack_initialize():
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    tier = request.json.get('tier', 'pro')
+    
+    plans = {
+        'pro': os.environ.get('PAYSTACK_PLAN_PRO'),
+        'enterprise': os.environ.get('PAYSTACK_PLAN_ENTERPRISE')
+    }
+    plan_code = plans.get(tier, plans['pro'])
+    
+    amounts = {'pro': 500000, 'enterprise': 1500000}  # In kobo (₦5,000 / ₦15,000)
+    amount_kobo = amounts.get(tier, 500000)
+    
+    if not user.paystack_customer_code:
+        customer_code = create_paystack_customer(
+            user.email,
+            user.name.split()[0] if user.name else 'User',
+            user.name.split()[-1] if user.name and len(user.name.split()) > 1 else ''
+        )
+        user.paystack_customer_code = customer_code
+        db.session.commit()
+    
+    auth_url = initialize_transaction(user.email, amount_kobo, plan_code=plan_code)
+    return jsonify({'authorization_url': auth_url})
+
+@app.route('/api/paystack/webhook', methods=['POST'])
+def paystack_webhook():
+    signature = request.headers.get('x-paystack-signature')
+    expected = hmac.new(
+        PAYSTACK_SECRET_KEY.encode(),
+        request.get_data(),
+        hashlib.sha512
+    ).hexdigest()
+    
+    if signature != expected:
+        return jsonify({'error': 'Invalid signature'}), 400
+    
+    event = request.json
+    event_type = event.get('event')
+    data = event.get('data', {})
+    
+    if event_type == 'charge.success':
+        email = data.get('customer', {}).get('email')
+        user = User.query.filter_by(email=email).first()
+        if user:
+            user.subscription_status = 'active'
+            user.subscription_tier = 'pro'
+            user.paystack_subscription_code = data.get('subscription', {}).get('subscription_code')
+            db.session.commit()
+    
+    elif event_type == 'subscription.disable':
+        subscription_code = data.get('subscription_code')
+        user = User.query.filter_by(paystack_subscription_code=subscription_code).first()
         if user:
             user.subscription_status = 'canceled'
             user.subscription_tier = 'free'
