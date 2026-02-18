@@ -35,6 +35,24 @@ stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')
 PAYSTACK_SECRET = os.environ.get('PAYSTACK_SECRET_KEY')
 
+# Cloudflare R2 Configuration
+R2_ENDPOINT = os.environ.get('R2_ENDPOINT')  # https://<account-id>.r2.cloudflarestorage.com
+R2_ACCESS_KEY = os.environ.get('R2_ACCESS_KEY')
+R2_SECRET_KEY = os.environ.get('R2_SECRET_KEY')
+R2_BUCKET_NAME = os.environ.get('R2_BUCKET_NAME', 'gift-recommender')
+R2_PUBLIC_URL = os.environ.get('R2_PUBLIC_URL')  # https://pub-<hash>.r2.dev
+
+# Initialize S3 client for R2
+s3_client = None
+if all([R2_ENDPOINT, R2_ACCESS_KEY, R2_SECRET_KEY]):
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=R2_ENDPOINT,
+        aws_access_key_id=R2_ACCESS_KEY,
+        aws_secret_access_key=R2_SECRET_KEY,
+        region_name='auto'  # R2 uses 'auto'
+    )
+
 # Google OAuth setup
 oauth = OAuth(app)
 oauth.register(
