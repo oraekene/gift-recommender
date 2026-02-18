@@ -256,25 +256,33 @@ def decrypt_key(encrypted_key):
 
 # Rate limiting
 def check_rate_limit(user_id, tier='free'):
-    if not redis_client:
+    """Rate limiting using database - no Redis required"""
+    user = User.query.get(user_id)
+    if not user:
         return True, 0
     
-    key = f"rate_limit:{user_id}"
-    current = redis_client.get(key)
+    # Reset monthly count if new month
+    now = datetime.utcnow()
+    if user.search_reset_date:
+        if user.search_reset_date.month != now.month or user.search_reset_date.year != now.year:
+            user.monthly_searches = 0
+            user.search_reset_date = now
+            db.session.commit()
+    else:
+        user.search_reset_date = now
+        db.session.commit()
     
     limits = {'free': 50, 'pro': 500, 'enterprise': 5000}
     limit = limits.get(tier, 50)
     
-    if current and int(current) >= limit:
-        ttl = redis_client.ttl(key)
-        return False, ttl
+    if user.monthly_searches >= limit:
+        # Calculate seconds until next month
+        next_month = datetime(now.year + (now.month // 12), ((now.month % 12) + 1), 1)
+        retry_after = int((next_month - now).total_seconds())
+        return False, retry_after
     
-    pipe = redis_client.pipeline()
-    pipe.incr(key)
-    pipe.expire(key, 86400)  # 24 hours
-    pipe.execute()
     return True, 0
-
+    
 # Search and Analysis Classes
 class BraveSearch:
     def __init__(self, api_key):
