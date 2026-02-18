@@ -15,7 +15,8 @@ export function Onboarding() {
   const { toast } = useToast()
   const [isLoading, setIsLoading] = useState(false)
   const [braveKey, setBraveKey] = useState('')
-  const [geminiKey, setGeminiKey] = useState('')
+  const [nvidiaKey, setNvidiaKey] = useState('')  // Changed from geminiKey
+  // const [geminiKey, setGeminiKey] = useState('')
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -24,7 +25,8 @@ export function Onboarding() {
     try {
       await api.post('/api/user/keys', {
         brave_api_key: braveKey,
-        gemini_api_key: geminiKey,
+        // gemini_api_key: geminiKey,
+        nvidia_api_key: nvidiaKey,  // Changed
       })
 
       updateUser({ has_api_keys: true })
@@ -96,11 +98,36 @@ export function Onboarding() {
                 </p>
               </div>
 
+              // <div className="space-y-2">
+                // <div className="flex items-center justify-between">
+                  // <Label htmlFor="gemini">Gemini API Key</Label>
+                  // <a
+                    // href="https://makersuite.google.com/app/apikey"
+                    // target="_blank"
+                    // rel="noopener noreferrer"
+                    // className="text-sm text-purple-600 hover:underline inline-flex items-center gap-1"
+                  // >
+                    // Get key <ExternalLink className="w-3 h-3" />
+                  // </a>
+                // </div>
+                // <Input
+                  // id="gemini"
+                  // type="password"
+                  // placeholder="Enter your Gemini API key"
+                  // value={geminiKey}
+                  // onChange={(e) => setGeminiKey(e.target.value)}
+                // />
+                // <p className="text-sm text-muted-foreground">
+                  // Free tier: 1,500 requests/day
+                // </p>
+              // </div>
+
+              // Replace Gemini references:
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="gemini">Gemini API Key</Label>
+                  <Label htmlFor="nvidia">NVIDIA API Key (Kimi K2.5)</Label>
                   <a
-                    href="https://makersuite.google.com/app/apikey"
+                    href="https://build.nvidia.com/moonshotai/kimi-k2.5"  // Changed URL
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-sm text-purple-600 hover:underline inline-flex items-center gap-1"
@@ -109,17 +136,17 @@ export function Onboarding() {
                   </a>
                 </div>
                 <Input
-                  id="gemini"
+                  id="nvidia"
                   type="password"
-                  placeholder="Enter your Gemini API key"
-                  value={geminiKey}
-                  onChange={(e) => setGeminiKey(e.target.value)}
+                  placeholder="nvapi-..."
+                  value={nvidiaKey}  // Changed state variable
+                  onChange={(e) => setNvidiaKey(e.target.value)}
                 />
                 <p className="text-sm text-muted-foreground">
-                  Free tier: 1,500 requests/day
+                  Free tier: 1,000 requests/day via NVIDIA
                 </p>
               </div>
-
+            
               <div className="flex gap-4">
                 <Button
                   type="button"
