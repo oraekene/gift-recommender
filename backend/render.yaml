@@ -17,6 +17,9 @@ services:
         fromDatabase:
           name: gift-db
           property: connectionString
+      - key: NVIDIA_API_KEY
+        sync: false  # Manual entry required
+      # Remove: GEMINI_API_KEY
       - key: REDIS_URL
         fromService:
           type: redis
