@@ -35,7 +35,12 @@ CORS(app, origins=[os.environ.get('FRONTEND_URL')], supports_credentials=True)
 
 # Redis for rate limiting and caching
 redis_url = os.environ.get('REDIS_URL')
-redis_client = redis.from_url(redis_url) if redis_url else None
+redis_client = None
+if redis_url and redis_url.strip():
+    try:
+        redis_client = redis.from_url(redis_url)
+    except:
+        redis_client = None
 
 # Encryption
 cipher_suite = Fernet(os.environ.get('ENCRYPTION_KEY'))
