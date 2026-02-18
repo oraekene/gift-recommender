@@ -24,6 +24,16 @@ services:
           property: connectionString
       - key: FRONTEND_URL
         value: https://gift-recommender.vercel.app  # Update after frontend deploy
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_ACCESS_KEY
+        sync: false
+      - key: R2_SECRET_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        value: gift-recommender
+      - key: R2_PUBLIC_URL
+        sync: false
 
 databases:
   - name: gift-db
