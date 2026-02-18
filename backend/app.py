@@ -185,7 +185,8 @@ class User(db.Model):
     
     # API Keys (encrypted)
     brave_api_key = db.Column(db.Text)
-    gemini_api_key = db.Column(db.Text)
+    # gemini_api_key = db.Column(db.Text)
+    nvidia_api_key = db.Column(db.Text)
 
     # Paystack
     paystack_customer_code = db.Column(db.String(255))
@@ -478,7 +479,8 @@ def google_auth():
                 'name': user.name,
                 'avatar': user.avatar,
                 'subscription_tier': user.subscription_tier,
-                'has_api_keys': bool(user.brave_api_key and user.gemini_api_key)
+                # 'has_api_keys': bool(user.brave_api_key and user.gemini_api_key),
+                'has_api_keys': bool(user.brave_api_key and user.nvidia_api_key)
             }
         })
         
@@ -585,7 +587,8 @@ def analyze():
         return jsonify({'error': 'No chat log provided'}), 400
     
     # Phase 1: Analyze
-    analyzer = PainPointAnalyzer(gemini_key)
+    # analyzer = PainPointAnalyzer(gemini_key)
+    analyzer = PainPointAnalyzer(nvidia_key)
     pains = analyzer.analyze(chat_text, recipient)
     
     if not pains:
