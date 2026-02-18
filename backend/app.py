@@ -443,12 +443,12 @@ def user_keys():
 def analyze():
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
-    
-    # Check API keys
+
+    # check API keys
     brave_key = decrypt_key(user.brave_api_key)
-    gemini_key = decrypt_key(user.gemini_api_key)
+    nvidia_key = decrypt_key(user.nvidia_api_key)
     
-    if not brave_key or not gemini_key:
+    if not brave_key or not nvidia_key:
         return jsonify({'error': 'API keys not configured'}), 400
     
     # Rate limiting
@@ -461,12 +461,30 @@ def analyze():
         }), 429
     
     data = request.get_json()
+    file_id = data.get('file_id')  # New: optional file reference
     chat_text = data.get('chat_log', '')
     recipient = data.get('recipient', 'Partner')
     location = data.get('location', 'Lagos, Nigeria')
     budget = data.get('budget', '100')
     currency = data.get('currency', 'USD')
     max_results = data.get('max_results', 4)
+
+    # If file_id provided, fetch content from R2
+    if file_id:
+        chat_file = ChatFile.query.get(file_id)
+        if not chat_file or chat_file.user_id != user_id:
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Get content from R2
+        r2_key = chat_file.r2_key
+        if R2_PUBLIC_URL and chat_file.r2_url.startswith(R2_PUBLIC_URL):
+            r2_key = chat_file.r2_url.replace(f"{R2_PUBLIC_URL}/", "")
+        
+        content = get_file_content(r2_key)
+        if content:
+            chat_text = content
+        else:
+            return jsonify({'error': 'Failed to load file content'}), 500
     
     if not chat_text:
         return jsonify({'error': 'No chat log provided'}), 400
@@ -519,6 +537,12 @@ def analyze():
         search_count=total_searches
     )
     db.session.add(analysis)
+    db.session.flush()  # Get analysis.id
+
+    # Update file with analysis reference
+    if file_id:
+        chat_file.analysis_id = analysis.id
+        chat_file.is_processed = True
     
     # Update usage
     user.monthly_searches += total_searches
