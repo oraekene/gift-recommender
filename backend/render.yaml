@@ -20,6 +20,15 @@ services:
       - key: NVIDIA_API_KEY
         sync: false  # Manual entry required
       # Remove: GEMINI_API_KEY
+      # APIs
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PLAN_PRO
+        sync: false
+      - key: PAYSTACK_PLAN_ENTERPRISE
+        sync: false
       - key: REDIS_URL
         fromService:
           type: redis
@@ -27,6 +36,8 @@ services:
           property: connectionString
       - key: FRONTEND_URL
         value: https://gift-recommender.vercel.app  # Update after frontend deploy
+      - key: REDIS_URL
+        value: ""  # Leave empty to disable rate limiting, or add external Redis URL
       - key: R2_ENDPOINT
         sync: false
       - key: R2_ACCESS_KEY
@@ -42,7 +53,3 @@ databases:
   - name: gift-db
     databaseName: giftrecommender
     user: giftuser
-
-redis:
-  - name: gift-redis
-    ipAllowList: []
