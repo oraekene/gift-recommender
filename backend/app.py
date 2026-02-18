@@ -42,17 +42,6 @@ R2_SECRET_KEY = os.environ.get('R2_SECRET_KEY')
 R2_BUCKET_NAME = os.environ.get('R2_BUCKET_NAME', 'gift-recommender')
 R2_PUBLIC_URL = os.environ.get('R2_PUBLIC_URL')  # https://pub-<hash>.r2.dev
 
-# Initialize S3 client for R2
-s3_client = None
-if all([R2_ENDPOINT, R2_ACCESS_KEY, R2_SECRET_KEY]):
-    s3_client = boto3.client(
-        's3',
-        endpoint_url=R2_ENDPOINT,
-        aws_access_key_id=R2_ACCESS_KEY,
-        aws_secret_access_key=R2_SECRET_KEY,
-        region_name='auto'  # R2 uses 'auto'
-    )
-
 # Google OAuth setup
 oauth = OAuth(app)
 oauth.register(
@@ -66,6 +55,112 @@ oauth.register(
 # Encryption for API keys
 from cryptography.fernet import Fernet
 cipher_suite = Fernet(os.environ.get('ENCRYPTION_KEY', Fernet.generate_key()))
+
+# Initialize S3 client for R2
+s3_client = None
+if all([R2_ENDPOINT, R2_ACCESS_KEY, R2_SECRET_KEY]):
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=R2_ENDPOINT,
+        aws_access_key_id=R2_ACCESS_KEY,
+        aws_secret_access_key=R2_SECRET_KEY,
+        region_name='auto'  # R2 uses 'auto'
+    )
+
+def ensure_bucket_exists():
+    """Create R2 bucket if it doesn't exist"""
+    if not s3_client:
+        return False
+    try:
+        s3_client.head_bucket(Bucket=R2_BUCKET_NAME)
+        return True
+    except:
+        try:
+            s3_client.create_bucket(Bucket=R2_BUCKET_NAME)
+            # Enable public access if needed
+            s3_client.put_bucket_cors(
+                Bucket=R2_BUCKET_NAME,
+                CORSConfiguration={
+                    'CORSRules': [
+                        {
+                            'AllowedOrigins': ['*'],
+                            'AllowedMethods': ['GET', 'PUT', 'POST', 'DELETE'],
+                            'AllowedHeaders': ['*'],
+                            'MaxAgeSeconds': 3600
+                        }
+                    ]
+                }
+            )
+            return True
+        except Exception as e:
+            print(f"Failed to create bucket: {e}")
+            return False
+
+def upload_chat_file(file_data, user_id, original_filename, analysis_id=None):
+    """
+    Upload chat file to R2
+    Returns: (success: bool, file_url: str, error_message: str)
+    """
+    if not s3_client:
+        return False, None, "R2 not configured"
+    
+    try:
+        # Generate unique key
+        file_ext = original_filename.rsplit('.', 1)[-1] if '.' in original_filename else 'txt'
+        r2_key = f"users/{user_id}/chats/{uuid.uuid4()}.{file_ext}"
+        
+        # Upload to R2
+        s3_client.put_object(
+            Bucket=R2_BUCKET_NAME,
+            Key=r2_key,
+            Body=file_data,
+            ContentType='text/plain',
+            Metadata={
+                'user-id': str(user_id),
+                'original-filename': original_filename,
+                'analysis-id': str(analysis_id) if analysis_id else ''
+            }
+        )
+        
+        # Generate public URL
+        if R2_PUBLIC_URL:
+            file_url = f"{R2_PUBLIC_URL}/{r2_key}"
+        else:
+            # Generate presigned URL (valid for 1 hour)
+            file_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': R2_BUCKET_NAME, 'Key': r2_key},
+                ExpiresIn=3600
+            )
+        
+        return True, file_url, None
+        
+    except Exception as e:
+        return False, None, str(e)
+
+def delete_chat_file(r2_key):
+    """Delete file from R2"""
+    if not s3_client:
+        return False
+    
+    try:
+        s3_client.delete_object(Bucket=R2_BUCKET_NAME, Key=r2_key)
+        return True
+    except Exception as e:
+        print(f"Failed to delete file: {e}")
+        return False
+
+def get_file_content(r2_key):
+    """Retrieve file content from R2"""
+    if not s3_client:
+        return None
+    
+    try:
+        response = s3_client.get_object(Bucket=R2_BUCKET_NAME, Key=r2_key)
+        return response['Body'].read().decode('utf-8')
+    except Exception as e:
+        print(f"Failed to get file: {e}")
+        return None
 
 # Database Models
 class User(db.Model):
@@ -107,6 +202,20 @@ class Analysis(db.Model):
     recommendations = db.Column(db.Text)
     search_count = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class ChatFile(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    analysis_id = db.Column(db.Integer, db.ForeignKey('analysis.id'), nullable=True)
+    original_filename = db.Column(db.String(255))
+    r2_key = db.Column(db.String(500), unique=True)  # Path in R2 bucket
+    r2_url = db.Column(db.String(1000))  # Public or presigned URL
+    file_size = db.Column(db.Integer)  # Bytes
+    mime_type = db.Column(db.String(100))
+    is_processed = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    analysis = db.relationship('Analysis', backref='chat_file')
 
 # Encryption helpers
 def encrypt_key(key):
@@ -423,6 +532,141 @@ def analyze():
         'search_count': total_searches,
         'saved_calls': (len(pains) * 3) - total_searches,
         'analysis_id': analysis.id
+    })
+
+@app.route('/api/upload', methods=['POST'])
+@jwt_required()
+def upload_file():
+    """Handle WhatsApp chat file upload to R2"""
+    user_id = get_jwt_identity()
+    
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'Empty filename'}), 400
+    
+    # Validate file type
+    allowed_extensions = {'.txt', '.zip', '.csv'}
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    if file_ext not in allowed_extensions:
+        return jsonify({'error': f'Invalid file type. Allowed: {allowed_extensions}'}), 400
+    
+    # Validate file size (max 10MB)
+    file_data = file.read()
+    if len(file_data) > 10 * 1024 * 1024:
+        return jsonify({'error': 'File too large (max 10MB)'}), 400
+    
+    # Upload to R2
+    success, file_url, error = upload_chat_file(
+        file_data=file_data,
+        user_id=user_id,
+        original_filename=file.filename
+    )
+    
+    if not success:
+        return jsonify({'error': f'Upload failed: {error}'}), 500
+    
+    # Save reference to database
+    chat_file = ChatFile(
+        user_id=user_id,
+        original_filename=file.filename,
+        r2_key=file_url.split('/')[-2] + '/' + file_url.split('/')[-1] if R2_PUBLIC_URL else file_url,
+        r2_url=file_url,
+        file_size=len(file_data),
+        mime_type='text/plain'
+    )
+    db.session.add(chat_file)
+    db.session.commit()
+    
+    # Extract text content for immediate analysis
+    try:
+        if file_ext == '.zip':
+            import zipfile
+            import io
+            with zipfile.ZipFile(io.BytesIO(file_data)) as z:
+                # Find _chat.txt inside zip
+                chat_txt = [f for f in z.namelist() if '_chat.txt' in f]
+                if chat_txt:
+                    content = z.read(chat_txt[0]).decode('utf-8', errors='ignore')
+                else:
+                    content = z.read(z.namelist()[0]).decode('utf-8', errors='ignore')
+        else:
+            content = file_data.decode('utf-8', errors='ignore')
+    except Exception as e:
+        content = None
+    
+    return jsonify({
+        'success': True,
+        'file_id': chat_file.id,
+        'file_url': file_url,
+        'file_size': len(file_data),
+        'content_preview': content[:1000] if content else None,
+        'full_content': content if len(content) < 50000 else None  # Return full if under 50KB
+    })
+
+@app.route('/api/files', methods=['GET'])
+@jwt_required()
+def list_files():
+    """List user's uploaded files"""
+    user_id = get_jwt_identity()
+    files = ChatFile.query.filter_by(user_id=user_id).order_by(ChatFile.created_at.desc()).all()
+    
+    return jsonify([{
+        'id': f.id,
+        'original_filename': f.original_filename,
+        'file_size': f.file_size,
+        'r2_url': f.r2_url,
+        'is_processed': f.is_processed,
+        'created_at': f.created_at.isoformat(),
+        'analysis_id': f.analysis_id
+    } for f in files])
+
+@app.route('/api/files/<int:file_id>', methods=['DELETE'])
+@jwt_required()
+def delete_file(file_id):
+    """Delete uploaded file"""
+    user_id = get_jwt_identity()
+    file = ChatFile.query.get_or_404(file_id)
+    
+    if file.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    # Delete from R2
+    if file.r2_key:
+        delete_chat_file(file.r2_key)
+    
+    # Delete from database
+    db.session.delete(file)
+    db.session.commit()
+    
+    return jsonify({'success': True})
+
+@app.route('/api/files/<int:file_id>/content', methods=['GET'])
+@jwt_required()
+def get_file_content_route(file_id):
+    """Get file content from R2"""
+    user_id = get_jwt_identity()
+    file = ChatFile.query.get_or_404(file_id)
+    
+    if file.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    # Extract key from URL
+    if R2_PUBLIC_URL and file.r2_url.startswith(R2_PUBLIC_URL):
+        r2_key = file.r2_url.replace(f"{R2_PUBLIC_URL}/", "")
+    else:
+        r2_key = file.r2_key
+    
+    content = get_file_content(r2_key)
+    
+    if content is None:
+        return jsonify({'error': 'Failed to retrieve file'}), 500
+    
+    return jsonify({
+        'content': content,
+        'filename': file.original_filename
     })
 
 @app.route('/api/history', methods=['GET'])
