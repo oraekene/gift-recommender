@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: gift-recommender-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 4 --threads 2
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false  # You'll add Supabase URL manually
+      - key: NVIDIA_API_KEY
+        sync: false  # Manual entry required
+      # Remove: GEMINI_API_KEY
+      # APIs
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PLAN_PRO
+        sync: false
+      - key: PAYSTACK_PLAN_ENTERPRISE
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: gift-redis
+          property: connectionString
+      - key: FRONTEND_URL
+        value: https://gift-recommender.vercel.app  # Update after frontend deploy
+      - key: REDIS_URL
+        value: ""  # Leave empty to disable rate limiting, or add external Redis URL
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_ACCESS_KEY
+        sync: false
+      - key: R2_SECRET_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        value: gift-recommender
+      - key: R2_PUBLIC_URL
+        sync: false
+
+databases:
+  - name: gift-db
+    databaseName: giftrecommender
+    user: giftuser

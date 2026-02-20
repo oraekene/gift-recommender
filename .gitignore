@@ -1,0 +1,22 @@
+# Backend
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+backend/*.db
+backend/venv/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# General
+.DS_Store
+*.log
+.env
+
+# Sensitive files - never commit these
+api keys.txt
+deployment_guide.md
+"deployment kimi chat.txt"
