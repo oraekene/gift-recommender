@@ -419,8 +419,7 @@ class ShoppingAgent:
         
     def brainstorm(self, pain_point, location):
         prompt = f"""Pain: "{pain_point}". Suggest 3 broad product categories (2-3 words each): practical, splurge, thoughtful.
-Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}
-        # resp = self.gemini.generate(prompt)
+Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}"""
         resp = self.kimi.generate(prompt)
         try:
             match = re.search(r'\{.*\}', resp.replace("\n", " "), re.DOTALL)

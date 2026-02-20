@@ -15,3 +15,8 @@ frontend/.env.local
 .DS_Store
 *.log
 .env
+
+# Sensitive files - never commit these
+api keys.txt
+deployment_guide.md
+"deployment kimi chat.txt"
