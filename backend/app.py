@@ -43,7 +43,12 @@ if redis_url and redis_url.strip():
         redis_client = None
 
 # Encryption
-cipher_suite = Fernet(os.environ.get('ENCRYPTION_KEY'))
+_enc_key = os.environ.get('ENCRYPTION_KEY')
+if not _enc_key:
+    _enc_key = Fernet.generate_key()
+elif isinstance(_enc_key, str):
+    _enc_key = _enc_key.encode()
+cipher_suite = Fernet(_enc_key)
 
 # Stripe setup
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
@@ -70,9 +75,7 @@ oauth.register(
     client_kwargs={'scope': 'openid email profile'}
 )
 
-# Encryption for API keys
-from cryptography.fernet import Fernet
-cipher_suite = Fernet(os.environ.get('ENCRYPTION_KEY', Fernet.generate_key()))
+# Encryption for API keys (cipher_suite already initialized above)
 
 # Initialize S3 client for R2
 s3_client = None
