@@ -31,7 +31,9 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=7)
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 # CORS(app, origins=[os.environ.get('FRONTEND_URL', 'http://localhost:5173')], supports_credentials=True)
-CORS(app, origins=[os.environ.get('FRONTEND_URL', 'http://localhost:5173')], supports_credentials=True)
+frontend_url = os.environ.get('FRONTEND_URL', '')
+cors_origins = [o for o in [frontend_url, 'https://gift-recommender-seven.vercel.app', 'http://localhost:5173'] if o]
+CORS(app, origins=cors_origins, supports_credentials=True)
 
 # Redis for rate limiting and caching
 redis_url = os.environ.get('REDIS_URL')
