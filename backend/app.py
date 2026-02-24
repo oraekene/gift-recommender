@@ -31,7 +31,7 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=7)
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 # CORS(app, origins=[os.environ.get('FRONTEND_URL', 'http://localhost:5173')], supports_credentials=True)
-CORS(app, origins=[os.environ.get('FRONTEND_URL')], supports_credentials=True)
+CORS(app, origins=[os.environ.get('FRONTEND_URL', 'http://localhost:5173')], supports_credentials=True)
 
 # Redis for rate limiting and caching
 redis_url = os.environ.get('REDIS_URL')
