@@ -98,36 +98,11 @@ export function Onboarding() {
                 </p>
               </div>
 
-              // <div className="space-y-2">
-                // <div className="flex items-center justify-between">
-                  // <Label htmlFor="gemini">Gemini API Key</Label>
-                  // <a
-                    // href="https://makersuite.google.com/app/apikey"
-                    // target="_blank"
-                    // rel="noopener noreferrer"
-                    // className="text-sm text-purple-600 hover:underline inline-flex items-center gap-1"
-                  // >
-                    // Get key <ExternalLink className="w-3 h-3" />
-                  // </a>
-                // </div>
-                // <Input
-                  // id="gemini"
-                  // type="password"
-                  // placeholder="Enter your Gemini API key"
-                  // value={geminiKey}
-                  // onChange={(e) => setGeminiKey(e.target.value)}
-                // />
-                // <p className="text-sm text-muted-foreground">
-                  // Free tier: 1,500 requests/day
-                // </p>
-              // </div>
-
-              // Replace Gemini references:
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="nvidia">NVIDIA API Key (Kimi K2.5)</Label>
                   <a
-                    href="https://build.nvidia.com/moonshotai/kimi-k2.5"  // Changed URL
+                    href="https://build.nvidia.com/moonshotai/kimi-k2.5"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-sm text-purple-600 hover:underline inline-flex items-center gap-1"
@@ -139,7 +114,7 @@ export function Onboarding() {
                   id="nvidia"
                   type="password"
                   placeholder="nvapi-..."
-                  value={nvidiaKey}  // Changed state variable
+                  value={nvidiaKey}
                   onChange={(e) => setNvidiaKey(e.target.value)}
                 />
                 <p className="text-sm text-muted-foreground">
@@ -159,7 +134,7 @@ export function Onboarding() {
                 <Button
                   type="submit"
                   className="flex-1"
-                  disabled={isLoading || !braveKey || !geminiKey}
+                  disabled={isLoading || !braveKey || !nvidiaKey}
                 >
                   {isLoading ? 'Saving...' : (
                     <>
@@ -177,7 +152,7 @@ export function Onboarding() {
           <h3 className="font-semibold text-blue-900 mb-2">Why do I need these?</h3>
           <ul className="text-sm text-blue-800 space-y-1">
             <li>• <strong>Brave Search</strong>: Finds real products from across the web</li>
-            <li>• <strong>Gemini AI</strong>: Analyzes chats and matches gifts to pain points</li>
+            <li>• <strong>NVIDIA Kimi AI</strong>: Analyzes chats and matches gifts to pain points</li>
             <li>• Both have generous free tiers - no credit card required</li>
           </ul>
         </div>

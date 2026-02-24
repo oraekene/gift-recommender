@@ -12,7 +12,7 @@ import { Check, CreditCard, Key, Zap } from 'lucide-react'
 export function Settings() {
   const { user, updateUser } = useAuthStore()
   const { toast } = useToast()
-  const [keys, setKeys] = useState({ brave: '', gemini: '', has_keys: false })
+  const [keys, setKeys] = useState({ brave: '', nvidia: '', has_keys: false })
   const [subscription, setSubscription] = useState({
     tier: 'free',
     searches_this_month: 0,
@@ -44,7 +44,7 @@ export function Settings() {
     try {
       await api.post('/api/user/keys', {
         brave_api_key: keys.brave,
-        gemini_api_key: keys.gemini,
+        nvidia_api_key: keys.nvidia,
       })
       updateUser({ has_api_keys: true })
       toast({ title: 'Keys updated successfully' })
@@ -109,12 +109,12 @@ export function Settings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Gemini API Key</Label>
+                <Label>NVIDIA API Key (Kimi K2.5)</Label>
                 <Input
                   type="password"
-                  value={keys.gemini}
-                  onChange={(e) => setKeys({ ...keys, gemini: e.target.value })}
-                  placeholder={keys.has_keys ? '••••••••••••••••' : 'Enter your Gemini API key'}
+                  value={keys.nvidia}
+                  onChange={(e) => setKeys({ ...keys, nvidia: e.target.value })}
+                  placeholder={keys.has_keys ? '••••••••••••••••' : 'Enter your NVIDIA API key (nvapi-...)'}
                 />
               </div>
               <Button type="submit" disabled={isLoading}>
@@ -134,8 +134,8 @@ export function Settings() {
               <span>{subscription.searches_this_month} searches used</span>
               <span>{subscription.search_limit} limit</span>
             </div>
-            <Progress 
-              value={(subscription.searches_this_month / subscription.search_limit) * 100} 
+            <Progress
+              value={(subscription.searches_this_month / subscription.search_limit) * 100}
             />
             <p className="text-sm text-muted-foreground">
               Total analyses: {subscription.total_analyses}
