@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -36,7 +36,7 @@ export function Onboarding() {
         description: 'Your API keys have been securely stored.',
       })
 
-      navigate({ to: '/dashboard' })
+      navigate('/dashboard')
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -49,7 +49,7 @@ export function Onboarding() {
   }
 
   const skipForNow = () => {
-    navigate({ to: '/dashboard' })
+    navigate('/dashboard')
   }
 
   return (
@@ -121,7 +121,7 @@ export function Onboarding() {
                   Free tier: 1,000 requests/day via NVIDIA
                 </p>
               </div>
-            
+
               <div className="flex gap-4">
                 <Button
                   type="button"

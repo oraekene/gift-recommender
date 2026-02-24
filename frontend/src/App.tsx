@@ -1,4 +1,4 @@
-import { RouterProvider, createRouter } from '@tanstack/react-router'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import { useAuthStore } from '@/store/auth'
@@ -10,44 +10,37 @@ import { Settings } from '@/pages/Settings'
 
 const queryClient = new QueryClient()
 
-// Route definitions
-const router = createRouter({
-  routeTree: [
-    {
-      path: '/login',
-      component: Login,
-    },
-    {
-      path: '/onboarding',
-      component: Onboarding,
-    },
-    {
-      path: '/dashboard',
-      component: Dashboard,
-    },
-    {
-      path: '/results/$analysisId',
-      component: Results,
-    },
-    {
-      path: '/settings',
-      component: Settings,
-    },
-    {
-      path: '/',
-      component: () => {
-        const { isAuthenticated } = useAuthStore()
-        return isAuthenticated ? <Dashboard /> : <Login />
-      },
-    },
-  ],
-})
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuthStore()
+  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
+}
 
 function App() {
+  const { isAuthenticated } = useAuthStore()
+
   return (
     <QueryClientProvider client={queryClient}>
-      <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID}>
-        <RouterProvider router={router} />
+      <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="/dashboard" element={
+              <ProtectedRoute><Dashboard /></ProtectedRoute>
+            } />
+            <Route path="/results/:analysisId" element={
+              <ProtectedRoute><Results /></ProtectedRoute>
+            } />
+            <Route path="/settings" element={
+              <ProtectedRoute><Settings /></ProtectedRoute>
+            } />
+            <Route path="*" element={
+              isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />
+            } />
+          </Routes>
+        </BrowserRouter>
       </GoogleOAuthProvider>
     </QueryClientProvider>
   )

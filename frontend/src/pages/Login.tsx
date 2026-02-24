@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -15,7 +15,7 @@ export function Login() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      navigate({ to: '/dashboard' })
+      navigate('/dashboard')
     }
   }, [isAuthenticated, navigate])
 
@@ -24,13 +24,13 @@ export function Login() {
       const { data } = await api.post('/api/auth/google', {
         token: credentialResponse.credential,
       })
-      
+
       setAuth(data.access_token, data.user)
-      
+
       if (!data.user.has_api_keys) {
-        navigate({ to: '/onboarding' })
+        navigate('/onboarding')
       } else {
-        navigate({ to: '/dashboard' })
+        navigate('/dashboard')
       }
     } catch (error) {
       console.error('Auth error:', error)

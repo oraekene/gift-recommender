@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from '@tanstack/react-router'
+import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
-import { 
-  ArrowLeft, 
-  ExternalLink, 
-  Sparkles, 
-  Gift, 
+import {
+  ArrowLeft,
+  ExternalLink,
+  Sparkles,
+  Gift,
   TrendingUp,
   MapPin,
   DollarSign,
@@ -36,7 +36,7 @@ interface Gift {
 }
 
 export function Results() {
-  const { analysisId } = useParams({ from: '/results/$analysisId' })
+  const { analysisId } = useParams()
   const navigate = useNavigate()
   const [data, setData] = useState<{
     pains: PainPoint[]
@@ -80,7 +80,7 @@ export function Results() {
         <Card>
           <CardContent className="pt-6 text-center">
             <p className="text-lg font-medium mb-4">Analysis not found</p>
-            <Button onClick={() => navigate({ to: '/dashboard' })}>
+            <Button onClick={() => navigate('/dashboard')}>
               Back to Dashboard
             </Button>
           </CardContent>
@@ -105,7 +105,7 @@ export function Results() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <Button
             variant="ghost"
-            onClick={() => navigate({ to: '/dashboard' })}
+            onClick={() => navigate('/dashboard')}
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
@@ -190,9 +190,9 @@ export function Results() {
                         <p className="text-sm text-muted-foreground">estimated</p>
                       </div>
                     </div>
-                    
+
                     <p className="text-sm text-gray-600 mb-4">{gift.reason}</p>
-                    
+
                     <div className="flex gap-3">
                       <Button asChild>
                         <a href={gift.url} target="_blank" rel="noopener noreferrer">

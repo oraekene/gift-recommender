@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -18,14 +18,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { 
-  Sparkles, 
-  History, 
-  Settings, 
-  LogOut, 
-  Gift, 
-  MapPin, 
-  DollarSign, 
+import {
+  Sparkles,
+  History,
+  Settings,
+  LogOut,
+  Gift,
+  MapPin,
+  DollarSign,
   User,
   Loader2,
   Search
@@ -48,7 +48,7 @@ export function Dashboard() {
   const { toast } = useToast()
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [progress, setProgress] = useState(0)
-  
+
   const [formData, setFormData] = useState({
     recipient: 'Partner',
     location: 'Lagos, Nigeria',
@@ -68,20 +68,17 @@ export function Dashboard() {
       const { data } = await api.post('/api/analyze', formData)
       setProgress(100)
 
-      navigate({
-        to: '/results/$analysisId',
-        params: { analysisId: data.analysis_id.toString() },
-      })
+      navigate(`/results/${data.analysis_id}`)
     } catch (error: any) {
       const message = error.response?.data?.error || 'Analysis failed'
-      
+
       if (error.response?.status === 429) {
         toast({
           title: 'Rate limit exceeded',
           description: 'Upgrade to Pro for more searches',
           variant: 'destructive',
         })
-        navigate({ to: '/settings' })
+        navigate('/settings')
       } else {
         toast({
           title: 'Error',
@@ -100,7 +97,7 @@ export function Dashboard() {
 
   const handleLogout = () => {
     logout()
-    navigate({ to: '/login' })
+    navigate('/login')
   }
 
   return (
@@ -119,7 +116,7 @@ export function Dashboard() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => navigate({ to: '/history' })}
+              onClick={() => navigate('/history')}
             >
               <History className="w-4 h-4 mr-2" />
               History
@@ -144,7 +141,7 @@ export function Dashboard() {
                   </div>
                 </div>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate({ to: '/settings' })}>
+                <DropdownMenuItem onClick={() => navigate('/settings')}>
                   <Settings className="mr-2 h-4 w-4" />
                   Settings
                 </DropdownMenuItem>
@@ -278,9 +275,9 @@ export function Dashboard() {
                     <div className="space-y-2">
                       <Progress value={progress} className="h-2" />
                       <p className="text-sm text-center text-muted-foreground">
-                        {progress < 30 ? 'Analyzing pain points...' : 
-                         progress < 100 ? 'Searching for gifts...' : 
-                         'Finalizing results...'}
+                        {progress < 30 ? 'Analyzing pain points...' :
+                          progress < 100 ? 'Searching for gifts...' :
+                            'Finalizing results...'}
                       </p>
                     </div>
                   )}
@@ -367,7 +364,7 @@ export function Dashboard() {
                 <Button
                   variant="outline"
                   className="w-full mt-4"
-                  onClick={() => navigate({ to: '/settings' })}
+                  onClick={() => navigate('/settings')}
                 >
                   Upgrade to Pro
                 </Button>
