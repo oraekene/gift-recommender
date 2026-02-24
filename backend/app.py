@@ -16,12 +16,13 @@ from cryptography.fernet import Fernet
 import stripe
 from authlib.integrations.flask_client import OAuth
 import redis
+import boto3
 
 app = Flask(__name__)
 # app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
 # app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///gifts.db')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-fallback-change-in-prod')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///gifts.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'jwt-fallback-change-in-prod')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=7)
@@ -965,7 +966,7 @@ def paystack_initialize():
 def paystack_webhook():
     signature = request.headers.get('x-paystack-signature')
     expected = hmac.new(
-        PAYSTACK_SECRET_KEY.encode(),
+        PAYSTACK_SECRET.encode(),
         request.get_data(),
         hashlib.sha512
     ).hexdigest()
