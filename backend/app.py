@@ -78,6 +78,20 @@ oauth.register(
 )
 
 # Encryption for API keys (cipher_suite already initialized above)
+def encrypt_key(key_text):
+    """Encrypt an API key for storage"""
+    if not key_text:
+        return None
+    return cipher_suite.encrypt(key_text.encode()).decode()
+
+def decrypt_key(encrypted_key):
+    """Decrypt a stored API key"""
+    if not encrypted_key:
+        return None
+    try:
+        return cipher_suite.decrypt(encrypted_key.encode()).decode()
+    except Exception:
+        return None
 
 # Initialize S3 client for R2
 s3_client = None
