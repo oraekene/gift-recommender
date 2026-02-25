@@ -77,21 +77,7 @@ oauth.register(
     client_kwargs={'scope': 'openid email profile'}
 )
 
-# Encryption for API keys (cipher_suite already initialized above)
-def encrypt_key(key_text):
-    """Encrypt an API key for storage"""
-    if not key_text:
-        return None
-    return cipher_suite.encrypt(key_text.encode()).decode()
-
-def decrypt_key(encrypted_key):
-    """Decrypt a stored API key"""
-    if not encrypted_key:
-        return None
-    try:
-        return cipher_suite.decrypt(encrypted_key.encode()).decode()
-    except Exception:
-        return None
+# Encryption helpers defined below (after models) - encrypt_key() / decrypt_key()
 
 # Initialize S3 client for R2
 s3_client = None
@@ -528,33 +514,39 @@ def user_keys():
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
     
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
     if request.method == 'GET':
-        # Return masked keys
-        brave_masked = '••••' + decrypt_key(user.brave_api_key)[-4:] if user.brave_api_key else None
-        # gemini_masked = '••••' + decrypt_key(user.gemini_api_key)[-4:] if user.gemini_api_key else None
-        nvidia_masked = '••••' + decrypt_key(user.nvidia_api_key)[-4:] if user.nvidia_api_key else None
+        # Return masked keys (null-safe: decrypt_key can return None)
+        brave_decrypted = decrypt_key(user.brave_api_key) if user.brave_api_key else None
+        nvidia_decrypted = decrypt_key(user.nvidia_api_key) if user.nvidia_api_key else None
+        brave_masked = '••••' + brave_decrypted[-4:] if brave_decrypted else None
+        nvidia_masked = '••••' + nvidia_decrypted[-4:] if nvidia_decrypted else None
         
         return jsonify({
             'brave_api_key': brave_masked,
-            # 'gemini_api_key': gemini_masked,
-            # 'has_keys': bool(user.brave_api_key and user.gemini_api_key
             'nvidia_api_key': nvidia_masked,
-            'has_keys': bool(user.brave_api_key and user.nvidia_api_key)
+            'has_keys': bool(brave_decrypted and nvidia_decrypted)
         })
     
     # POST - update keys
-    data = request.get_json()
-    brave_key = data.get('brave_api_key', '').strip()
-    nvidia_key = data.get('nvidia_api_key', '').strip()
-    
-    # Save keys (skip slow API validation - keys are validated when used)
-    if brave_key:
-        user.brave_api_key = encrypt_key(brave_key)
-    if nvidia_key:
-        user.nvidia_api_key = encrypt_key(nvidia_key)
-    
-    db.session.commit()
-    return jsonify({'success': True})
+    try:
+        data = request.get_json()
+        brave_key = data.get('brave_api_key', '').strip()
+        nvidia_key = data.get('nvidia_api_key', '').strip()
+        
+        # Save keys (skip slow API validation - keys are validated when used)
+        if brave_key:
+            user.brave_api_key = encrypt_key(brave_key)
+        if nvidia_key:
+            user.nvidia_api_key = encrypt_key(nvidia_key)
+        
+        db.session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f'❌ Key update error: {e}')
+        return jsonify({'error': f'Failed to save keys: {str(e)}'}), 500
 
 @app.route('/api/analyze', methods=['POST'])
 @jwt_required()

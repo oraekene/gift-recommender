@@ -31,7 +31,11 @@ export function Settings() {
         api.get('/api/user/keys'),
         api.get('/api/user/subscription'),
       ])
-      setKeys(keysRes.data)
+      setKeys({
+        brave: keysRes.data.brave_api_key || '',
+        nvidia: keysRes.data.nvidia_api_key || '',
+        has_keys: keysRes.data.has_keys,
+      })
       setSubscription(subRes.data)
     } catch (error) {
       console.error('Failed to load settings:', error)
