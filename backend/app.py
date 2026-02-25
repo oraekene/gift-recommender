@@ -490,7 +490,7 @@ def google_auth():
         user.last_active = datetime.utcnow()
         db.session.commit()
         
-        access_token = create_access_token(identity=user.id)
+        access_token = create_access_token(identity=str(user.id))
         
         return jsonify({
             'access_token': access_token,
@@ -511,7 +511,7 @@ def google_auth():
 @app.route('/api/user/keys', methods=['GET', 'POST'])
 @jwt_required()
 def user_keys():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     
     if not user:
@@ -552,7 +552,7 @@ def user_keys():
 @jwt_required()
 def analyze():
   try:
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
 
     # check API keys
@@ -680,7 +680,7 @@ def analyze():
 @jwt_required()
 def upload_file():
     """Handle WhatsApp chat file upload to R2"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
@@ -752,7 +752,7 @@ def upload_file():
 @jwt_required()
 def list_files():
     """List user's uploaded files"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     files = ChatFile.query.filter_by(user_id=user_id).order_by(ChatFile.created_at.desc()).all()
     
     return jsonify([{
@@ -769,7 +769,7 @@ def list_files():
 @jwt_required()
 def delete_file(file_id):
     """Delete uploaded file"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     file = ChatFile.query.get_or_404(file_id)
     
     if file.user_id != user_id:
@@ -789,7 +789,7 @@ def delete_file(file_id):
 @jwt_required()
 def get_file_content_route(file_id):
     """Get file content from R2"""
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     file = ChatFile.query.get_or_404(file_id)
     
     if file.user_id != user_id:
@@ -814,7 +814,7 @@ def get_file_content_route(file_id):
 @app.route('/api/history', methods=['GET'])
 @jwt_required()
 def get_history():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     analyses = Analysis.query.filter_by(user_id=user_id).order_by(Analysis.created_at.desc()).all()
     
     return jsonify([{
@@ -830,7 +830,7 @@ def get_history():
 @app.route('/api/history/<int:analysis_id>', methods=['GET'])
 @jwt_required()
 def get_analysis(analysis_id):
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     analysis = Analysis.query.get_or_404(analysis_id)
     
     if analysis.user_id != user_id:
@@ -852,7 +852,7 @@ def get_analysis(analysis_id):
 @app.route('/api/stripe/checkout', methods=['POST'])
 @jwt_required()
 def create_checkout():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     
     tier = request.json.get('tier', 'pro')
@@ -885,7 +885,7 @@ def create_checkout():
 @app.route('/api/stripe/portal', methods=['POST'])
 @jwt_required()
 def customer_portal():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     
     if not user.stripe_customer_id:
@@ -937,7 +937,7 @@ def stripe_webhook():
 @app.route('/api/paystack/initialize', methods=['POST'])
 @jwt_required()
 def paystack_initialize():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     tier = request.json.get('tier', 'pro')
     
@@ -1000,7 +1000,7 @@ def paystack_webhook():
 @app.route('/api/user/subscription', methods=['GET'])
 @jwt_required()
 def get_subscription():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     
     return jsonify({
