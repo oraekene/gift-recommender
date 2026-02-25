@@ -45,11 +45,21 @@ if redis_url and redis_url.strip():
         redis_client = None
 
 # Encryption
-_enc_key = os.environ.get('ENCRYPTION_KEY')
-if not _enc_key:
+import base64
+_enc_key_raw = os.environ.get('ENCRYPTION_KEY')
+if not _enc_key_raw:
     _enc_key = Fernet.generate_key()
-elif isinstance(_enc_key, str):
-    _enc_key = _enc_key.encode()
+else:
+    # Try using the value directly as a Fernet key
+    try:
+        _test = _enc_key_raw.encode() if isinstance(_enc_key_raw, str) else _enc_key_raw
+        Fernet(_test)  # validate
+        _enc_key = _test
+    except (ValueError, Exception):
+        # Derive a valid 32-byte Fernet key from arbitrary input via SHA256
+        _derived = hashlib.sha256(_enc_key_raw.encode()).digest()
+        _enc_key = base64.urlsafe_b64encode(_derived)
+        print(f"⚠️ ENCRYPTION_KEY was not a valid Fernet key — derived one via SHA256")
 cipher_suite = Fernet(_enc_key)
 
 # Stripe setup
