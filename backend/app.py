@@ -338,7 +338,7 @@ class KimiClient:
         self.api_key = api_key
         self.invoke_url = "https://integrate.api.nvidia.com/v1/chat/completions"
         
-    def generate(self, prompt):
+    def generate(self, prompt, max_retries=2):
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Accept": "application/json"
@@ -352,19 +352,24 @@ class KimiClient:
             "stream": False,
             "chat_template_kwargs": {"thinking": False}
         }
-        try:
-            response = requests.post(self.invoke_url, headers=headers, json=payload, timeout=60)
-            response.raise_for_status()
-            data = response.json()
-            if 'choices' in data and len(data['choices']) > 0:
-                return data['choices'][0]['message']['content']
-            return "{}"
-        except requests.exceptions.Timeout:
-            print("❌ Kimi API timeout")
-            return "{}"
-        except Exception as e:
-            print(f"❌ Kimi API Error: {e}")
-            return "{}"
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(self.invoke_url, headers=headers, json=payload, timeout=120)
+                response.raise_for_status()
+                data = response.json()
+                if 'choices' in data and len(data['choices']) > 0:
+                    return data['choices'][0]['message']['content']
+                return "{}"
+            except requests.exceptions.Timeout:
+                print(f"⏳ Kimi API timeout (attempt {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    time.sleep(5)  # backoff before retry
+                    continue
+                print("❌ Kimi API timeout after all retries")
+                return "__TIMEOUT__"
+            except Exception as e:
+                print(f"❌ Kimi API Error: {e}")
+                return "{}"
 
 # Paystack helpers
 def paystack_request(method, endpoint, data=None):
@@ -406,8 +411,9 @@ class PainPointAnalyzer:
         prompt = f"""Analyze this chat for pain points experienced by {recipient}.
 Return JSON array with fields: pain_point (string), score (1-10), category (Physical/Emotional/Practical), trigger_text (exact quote), context (brief).
 Chat: {chat_text[:4000]}"""
-        # resp = self.gemini.generate(prompt)
         resp = self.kimi.generate(prompt)
+        if resp == "__TIMEOUT__":
+            return "__TIMEOUT__"
         try:
             match = re.search(r'\[.*\]', resp.replace("\n", " "), re.DOTALL)
             return json.loads(match.group(0)) if match else []
@@ -605,8 +611,11 @@ def analyze():
     analyzer = PainPointAnalyzer(nvidia_key)
     pains = analyzer.analyze(chat_text, recipient)
     
+    if pains == "__TIMEOUT__":
+        return jsonify({'error': 'AI service timed out. The Kimi API may be experiencing high load — please try again in a minute.'}), 504
+    
     if not pains:
-        return jsonify({'error': 'No pain points detected'}), 400
+        return jsonify({'error': 'No pain points detected — try pasting a longer or more detailed chat log.'}), 400
     
     # Phase 2: Shopping
     # shopper = ShoppingAgent(gemini_key, brave_key)
