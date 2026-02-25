@@ -545,25 +545,11 @@ def user_keys():
     # POST - update keys
     data = request.get_json()
     brave_key = data.get('brave_api_key', '').strip()
-    # gemini_key = data.get('gemini_api_key', '').strip()
     nvidia_key = data.get('nvidia_api_key', '').strip()
     
-    # Validate keys    
-    if nvidia_key:
-        test_client = KimiClient(nvidia_key)
-        test_resp = test_client.generate("Say 'test'")
-        if not test_resp or test_resp == "{}":
-            return jsonify({'error': 'Invalid NVIDIA API key'}), 400
-    
-    if brave_key:
-        test = BraveSearch(brave_key)
-        if not test.search("test", 1):
-            return jsonify({'error': 'Invalid Brave API key'}), 400
-    
+    # Save keys (skip slow API validation - keys are validated when used)
     if brave_key:
         user.brave_api_key = encrypt_key(brave_key)
-    # if gemini_key:
-        # user.gemini_api_key = encrypt_key(gemini_key)
     if nvidia_key:
         user.nvidia_api_key = encrypt_key(nvidia_key)
     
@@ -573,6 +559,7 @@ def user_keys():
 @app.route('/api/analyze', methods=['POST'])
 @jwt_required()
 def analyze():
+  try:
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
 
@@ -581,7 +568,7 @@ def analyze():
     nvidia_key = decrypt_key(user.nvidia_api_key)
     
     if not brave_key or not nvidia_key:
-        return jsonify({'error': 'API keys not configured'}), 400
+        return jsonify({'error': 'API keys not configured. Please add your NVIDIA and Brave API keys in Settings.'}), 400
     
     # Rate limiting
     allowed, ttl = check_rate_limit(user_id, user.subscription_tier)
@@ -691,6 +678,11 @@ def analyze():
         'saved_calls': (len(pains) * 3) - total_searches,
         'analysis_id': analysis.id
     })
+  except Exception as e:
+    print(f"❌ Analyze error: {e}")
+    import traceback
+    traceback.print_exc()
+    return jsonify({'error': f'Analysis failed: {str(e)}'}), 500
 
 @app.route('/api/upload', methods=['POST'])
 @jwt_required()
