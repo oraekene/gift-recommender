@@ -453,7 +453,14 @@ class ShoppingAgent:
         self.search = BraveSearch(brave_key)
         
     def brainstorm(self, pain_point, location):
-        prompt = f"""Pain: "{pain_point}". Suggest 3 broad product categories (2-3 words each): practical, splurge, thoughtful.
+        prompt = f"""Someone is experiencing this specific problem: "{pain_point}".
+Think carefully about what would DIRECTLY solve or significantly relieve this exact problem.
+Suggest 3 specific product types that would be the most beneficial, useful, and satisfying gift to help with this exact issue:
+- practical: An everyday functional product that directly addresses this problem
+- splurge: A premium/luxury version of a product that solves this problem
+- thoughtful: A creative or caring gift that shows you understand their struggle
+Each suggestion should be 2-4 words describing a specific product type (not a brand).
+The product MUST directly help with "{pain_point}" — do NOT suggest unrelated products.
 Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}"""
         resp = self.kimi.generate(prompt)
         try:
@@ -462,10 +469,16 @@ Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}"""
         except:
             return {"practical": pain_point + " solution"}
     
-    def vet(self, item, results, budget, currency, location):
-        prompt = f"""Select best product under {budget} {currency} in {location} from these {len(results)} results: {json.dumps(results[:3])}.
-Return JSON with: {{"product": "Name", "price_guess": "50", "url": "link", "reason": "A warm, natural, human-friendly 1-sentence description of why this gift is perfect for someone experiencing this issue. Write as if recommending to a friend, not a developer.", "technical_reason": "Detailed technical analysis of pricing, availability, platform comparison, and selection logic"}} or {{}} if over budget."""
-        # resp = self.gemini.generate(prompt)
+    def vet(self, item, results, budget, currency, location, pain_point):
+        prompt = f"""The recipient is struggling with: "{pain_point}"
+We searched for "{item}" to help solve this. Select the best product under {budget} {currency} in {location} from these results: {json.dumps(results[:3])}.
+Return JSON with:
+- "product": the product name
+- "price_guess": estimated price as a number string
+- "url": the product link
+- "reason": A warm, caring 1-2 sentence description focused ONLY on how this gift will help the recipient feel better and solve their "{pain_point}" problem. Do NOT mention the website, platform, marketplace, shipping, or pricing details. Write as if you're a thoughtful friend explaining why you picked this gift.
+- "technical_reason": Detailed technical analysis of pricing, availability, platform, and selection logic (for developer logs only)
+Return {{}} if nothing fits the budget."""
         resp = self.kimi.generate(prompt)
         try:
             match = re.search(r'\{.*\}', resp.replace("\n", " "), re.DOTALL)
@@ -610,20 +623,26 @@ def analyze():
     if not pains:
         return jsonify({'error': 'No pain points detected — try pasting a longer or more detailed chat log.'}), 400
     
-    # Phase 2: Shopping
-    # shopper = ShoppingAgent(gemini_key, brave_key)
+    # Phase 2: Shopping — sort pain points by score, pick the highest
     shopper = ShoppingAgent(nvidia_key, brave_key)
     gifts = []
     total_searches = 0
     
-    for pain in pains[:3]:
-        if len(gifts) >= 3:
-            break
+    # Sort pain points by score (highest first) and pick the top one
+    sorted_pains = sorted(pains, key=lambda p: p.get('score', 0), reverse=True)
+    top_pain = sorted_pains[0] if sorted_pains else None
+    
+    if top_pain:
+        pain_text = top_pain.get('pain_point', '')
+        pain_score = top_pain.get('score', 0)
         
-        ideas = shopper.brainstorm(pain.get('pain_point', ''), location)
+        # Brainstorm 3 gift ideas (practical, splurge, thoughtful) for the top pain point
+        ideas = shopper.brainstorm(pain_text, location)
         
-        for strategy, item in ideas.items():
-            if not isinstance(item, str):
+        # Search and vet each strategy independently to get one gift per category
+        for strategy in ['practical', 'splurge', 'thoughtful']:
+            item = ideas.get(strategy)
+            if not item or not isinstance(item, str):
                 continue
             
             query = f"buy {item} online {location} price"
@@ -631,13 +650,12 @@ def analyze():
             total_searches += 1
             
             if results:
-                rec = shopper.vet(item, results, budget, currency, location)
+                rec = shopper.vet(item, results, budget, currency, location, pain_text)
                 if rec:
                     rec['strategy'] = strategy
-                    rec['pain_point'] = pain.get('pain_point', '')
-                    rec['pain_score'] = pain.get('score', 0)
+                    rec['pain_point'] = pain_text
+                    rec['pain_score'] = pain_score
                     gifts.append(rec)
-                    break
     
     # Log technical details for developer (backend only)
     saved_calls = (len(pains) * 3) - total_searches
