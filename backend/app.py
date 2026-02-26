@@ -24,6 +24,12 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-fallback-change-in-prod')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///gifts.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,       # Check connection liveness before each use
+    'pool_recycle': 300,         # Recycle connections every 5 min (prevents stale SSL)
+    'pool_size': 5,
+    'max_overflow': 10,
+}
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'jwt-fallback-change-in-prod')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=7)
 
