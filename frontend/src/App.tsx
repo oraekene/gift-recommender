@@ -7,6 +7,7 @@ import { Onboarding } from '@/pages/Onboarding'
 import { Dashboard } from '@/pages/Dashboard'
 import { Results } from '@/pages/Results'
 import { Settings } from '@/pages/Settings'
+import { History } from '@/pages/History'
 import { Toaster } from '@/components/ui/toaster'
 
 const queryClient = new QueryClient()
@@ -37,6 +38,9 @@ function App() {
               } />
               <Route path="/settings" element={
                 <ProtectedRoute><Settings /></ProtectedRoute>
+              } />
+              <Route path="/history" element={
+                <ProtectedRoute><History /></ProtectedRoute>
               } />
               <Route path="*" element={
                 isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />
