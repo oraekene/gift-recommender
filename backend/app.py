@@ -72,6 +72,10 @@ cipher_suite = Fernet(_enc_key)
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')
 
+# App-level API keys (set by developer, not per-user)
+BRAVE_API_KEY = os.environ.get('BRAVE_API_KEY')
+NVIDIA_API_KEY = os.environ.get('NVIDIA_API_KEY')
+
 # Paystack config
 PAYSTACK_SECRET = os.environ.get('PAYSTACK_SECRET_KEY')
 PAYSTACK_BASE_URL = "https://api.paystack.co"
@@ -425,14 +429,18 @@ class PainPointAnalyzer:
         
     def analyze(self, chat_text, recipient):
         prompt = f"""Analyze this chat for pain points experienced by {recipient}.
-Return JSON array with fields: pain_point (string), score (1-10), category (Physical/Emotional/Practical), trigger_text (exact quote), context (brief).
+IMPORTANT: Group similar complaints together. Return EXACTLY 3 consolidated pain point categories.
+For example, merge "back pain", "neck stiffness", and "posture problems" into one "Posture & Body Pain" category.
+Pick the most representative quote as trigger_text and average the severity for the score.
+Return JSON array with EXACTLY 3 items, each with fields: pain_point (string), score (1-10), category (Physical/Emotional/Practical), trigger_text (exact quote from chat), context (brief summary of all related complaints in this group).
 Chat: {chat_text[:4000]}"""
         resp = self.kimi.generate(prompt)
         if resp == "__TIMEOUT__":
             return "__TIMEOUT__"
         try:
             match = re.search(r'\[.*\]', resp.replace("\n", " "), re.DOTALL)
-            return json.loads(match.group(0)) if match else []
+            results = json.loads(match.group(0)) if match else []
+            return results[:3]  # Hard cap at 3
         except Exception as e:
             print(f"Parse error: {e}")
             return []
@@ -456,7 +464,7 @@ Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}"""
     
     def vet(self, item, results, budget, currency, location):
         prompt = f"""Select best product under {budget} {currency} in {location} from these {len(results)} results: {json.dumps(results[:3])}.
-Return JSON: {{"product": "Name", "price_guess": "50", "url": "link", "reason": "Why fits"}} or {{}} if over budget."""
+Return JSON with: {{"product": "Name", "price_guess": "50", "url": "link", "reason": "A warm, natural, human-friendly 1-sentence description of why this gift is perfect for someone experiencing this issue. Write as if recommending to a friend, not a developer.", "technical_reason": "Detailed technical analysis of pricing, availability, platform comparison, and selection logic"}} or {{}} if over budget."""
         # resp = self.gemini.generate(prompt)
         resp = self.kimi.generate(prompt)
         try:
@@ -522,8 +530,7 @@ def google_auth():
                 'name': user.name,
                 'avatar': user.avatar,
                 'subscription_tier': user.subscription_tier,
-                # 'has_api_keys': bool(user.brave_api_key and user.gemini_api_key),
-                'has_api_keys': bool(user.brave_api_key and user.nvidia_api_key)
+                'has_api_keys': True  # API keys are now app-level, always available
             }
         })
         
@@ -533,42 +540,12 @@ def google_auth():
 @app.route('/api/user/keys', methods=['GET', 'POST'])
 @jwt_required()
 def user_keys():
-    user_id = int(get_jwt_identity())
-    user = User.query.get(user_id)
-    
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-    
-    if request.method == 'GET':
-        # Return masked keys (null-safe: decrypt_key can return None)
-        brave_decrypted = decrypt_key(user.brave_api_key) if user.brave_api_key else None
-        nvidia_decrypted = decrypt_key(user.nvidia_api_key) if user.nvidia_api_key else None
-        brave_masked = '••••' + brave_decrypted[-4:] if brave_decrypted else None
-        nvidia_masked = '••••' + nvidia_decrypted[-4:] if nvidia_decrypted else None
-        
-        return jsonify({
-            'brave_api_key': brave_masked,
-            'nvidia_api_key': nvidia_masked,
-            'has_keys': bool(brave_decrypted and nvidia_decrypted)
-        })
-    
-    # POST - update keys
-    try:
-        data = request.get_json()
-        brave_key = data.get('brave_api_key', '').strip()
-        nvidia_key = data.get('nvidia_api_key', '').strip()
-        
-        # Save keys (skip slow API validation - keys are validated when used)
-        if brave_key:
-            user.brave_api_key = encrypt_key(brave_key)
-        if nvidia_key:
-            user.nvidia_api_key = encrypt_key(nvidia_key)
-        
-        db.session.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        print(f'❌ Key update error: {e}')
-        return jsonify({'error': f'Failed to save keys: {str(e)}'}), 500
+    # API keys are now managed at the app level by the developer
+    # This route is kept as a no-op for backward compatibility
+    return jsonify({
+        'has_keys': True,
+        'message': 'API keys are managed by the application'
+    })
 
 @app.route('/api/analyze', methods=['POST'])
 @jwt_required()
@@ -577,12 +554,12 @@ def analyze():
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
 
-    # check API keys
-    brave_key = decrypt_key(user.brave_api_key)
-    nvidia_key = decrypt_key(user.nvidia_api_key)
+    # Use app-level API keys (set by developer)
+    brave_key = BRAVE_API_KEY
+    nvidia_key = NVIDIA_API_KEY
     
     if not brave_key or not nvidia_key:
-        return jsonify({'error': 'API keys not configured. Please add your NVIDIA and Brave API keys in Settings.'}), 400
+        return jsonify({'error': 'Service temporarily unavailable. Please contact support.'}), 503
     
     # Rate limiting
     allowed, ttl = check_rate_limit(user_id, user.subscription_tier)
@@ -639,7 +616,7 @@ def analyze():
     gifts = []
     total_searches = 0
     
-    for pain in pains[:5]:
+    for pain in pains[:3]:
         if len(gifts) >= 3:
             break
         
@@ -662,7 +639,20 @@ def analyze():
                     gifts.append(rec)
                     break
     
-    # Save analysis
+    # Log technical details for developer (backend only)
+    saved_calls = (len(pains) * 3) - total_searches
+    print(f"📊 Analysis stats — Pain points: {len(pains)}, Searches: {total_searches}, API calls saved: {saved_calls}")
+    for i, gift in enumerate(gifts):
+        tech_reason = gift.get('technical_reason', 'N/A')
+        print(f"🎁 Gift {i+1} [{gift.get('product', '?')}] technical_reason: {tech_reason}")
+    
+    # Strip technical_reason from gifts before saving/returning
+    gifts_for_frontend = []
+    for gift in gifts:
+        clean_gift = {k: v for k, v in gift.items() if k != 'technical_reason'}
+        gifts_for_frontend.append(clean_gift)
+    
+    # Save analysis (with technical reasons stripped)
     analysis = Analysis(
         user_id=user.id,
         recipient_name=recipient,
@@ -671,7 +661,7 @@ def analyze():
         currency=currency,
         chat_log=chat_text[:2000],
         pain_points=json.dumps(pains),
-        recommendations=json.dumps(gifts),
+        recommendations=json.dumps(gifts_for_frontend),
         search_count=total_searches
     )
     db.session.add(analysis)
@@ -690,9 +680,8 @@ def analyze():
     
     return jsonify({
         'pains': pains,
-        'gifts': gifts,
+        'gifts': gifts_for_frontend,
         'search_count': total_searches,
-        'saved_calls': (len(pains) * 3) - total_searches,
         'analysis_id': analysis.id
     })
   except Exception as e:

@@ -3,23 +3,19 @@ import { useAuthStore } from '@/store/auth'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { useToast } from '@/hooks/use-toast'
-import { Check, CreditCard, Key, Zap } from 'lucide-react'
+import { Check, CreditCard, Zap } from 'lucide-react'
 
 export function Settings() {
-  const { user, updateUser } = useAuthStore()
+  const { user } = useAuthStore()
   const { toast } = useToast()
-  const [keys, setKeys] = useState({ brave: '', nvidia: '', has_keys: false })
   const [subscription, setSubscription] = useState({
     tier: 'free',
     searches_this_month: 0,
     search_limit: 50,
     total_analyses: 0,
   })
-  const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
     fetchData()
@@ -27,40 +23,10 @@ export function Settings() {
 
   const fetchData = async () => {
     try {
-      const [keysRes, subRes] = await Promise.all([
-        api.get('/api/user/keys'),
-        api.get('/api/user/subscription'),
-      ])
-      setKeys({
-        brave: keysRes.data.brave_api_key || '',
-        nvidia: keysRes.data.nvidia_api_key || '',
-        has_keys: keysRes.data.has_keys,
-      })
+      const subRes = await api.get('/api/user/subscription')
       setSubscription(subRes.data)
     } catch (error) {
       console.error('Failed to load settings:', error)
-    }
-  }
-
-  const handleUpdateKeys = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    try {
-      await api.post('/api/user/keys', {
-        brave_api_key: keys.brave,
-        nvidia_api_key: keys.nvidia,
-      })
-      updateUser({ has_api_keys: true })
-      toast({ title: 'Keys updated successfully' })
-      fetchData()
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.error || 'Failed to update keys',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsLoading(false)
     }
   }
 
@@ -87,46 +53,8 @@ export function Settings() {
       <div className="max-w-4xl mx-auto space-y-8">
         <div>
           <h1 className="text-3xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">Manage your API keys and subscription</p>
+          <p className="text-muted-foreground">Manage your subscription and usage</p>
         </div>
-
-        {/* API Keys */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Key className="w-5 h-5" />
-              API Keys
-            </CardTitle>
-            <CardDescription>
-              Your keys are encrypted and never shared
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleUpdateKeys} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Brave Search API Key</Label>
-                <Input
-                  type="password"
-                  value={keys.brave}
-                  onChange={(e) => setKeys({ ...keys, brave: e.target.value })}
-                  placeholder={keys.has_keys ? '••••••••••••••••' : 'Enter your Brave API key'}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>NVIDIA API Key (Kimi K2.5)</Label>
-                <Input
-                  type="password"
-                  value={keys.nvidia}
-                  onChange={(e) => setKeys({ ...keys, nvidia: e.target.value })}
-                  placeholder={keys.has_keys ? '••••••••••••••••' : 'Enter your NVIDIA API key (nvapi-...)'}
-                />
-              </div>
-              <Button type="submit" disabled={isLoading}>
-                {isLoading ? 'Saving...' : 'Update Keys'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
 
         {/* Usage */}
         <Card>

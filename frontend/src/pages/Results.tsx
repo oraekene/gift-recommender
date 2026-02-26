@@ -213,7 +213,7 @@ export function Results() {
             {/* Stats */}
             <Card className="mt-6 bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200">
               <CardContent className="pt-6">
-                <div className="grid grid-cols-3 gap-4 text-center">
+                <div className="grid grid-cols-2 gap-4 text-center">
                   <div>
                     <p className="text-2xl font-bold text-purple-600">{data.pains.length}</p>
                     <p className="text-sm text-muted-foreground">Pain Points</p>
@@ -221,12 +221,6 @@ export function Results() {
                   <div>
                     <p className="text-2xl font-bold text-purple-600">{data.search_count}</p>
                     <p className="text-sm text-muted-foreground">Searches</p>
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-purple-600">
-                      {data.pains.length * 3 - data.search_count}
-                    </p>
-                    <p className="text-sm text-muted-foreground">API Calls Saved</p>
                   </div>
                 </div>
               </CardContent>
