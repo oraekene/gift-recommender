@@ -13,7 +13,7 @@ interface FileUploadProps {
 export function FileUpload({ onFileUploaded }: FileUploadProps) {
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [uploadedFile, setUploadedFile] = useState<{id: number, name: string, size: number} | null>(null)
+  const [uploadedFile, setUploadedFile] = useState<{ id: number, name: string, size: number } | null>(null)
   const { toast } = useToast()
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
@@ -76,7 +76,9 @@ export function FileUpload({ onFileUploaded }: FileUploadProps) {
     accept: {
       'text/plain': ['.txt'],
       'application/zip': ['.zip'],
-      'text/csv': ['.csv']
+      'text/csv': ['.csv'],
+      'application/json': ['.json'],
+      'text/html': ['.html'],
     },
     maxSize: 10 * 1024 * 1024, // 10MB
     disabled: uploading
@@ -103,29 +105,32 @@ export function FileUpload({ onFileUploaded }: FileUploadProps) {
     <div
       {...getRootProps()}
       className={`
-        border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
+        border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors
         ${isDragActive ? 'border-purple-500 bg-purple-50' : 'border-gray-300 hover:border-gray-400'}
         ${uploading ? 'pointer-events-none opacity-50' : ''}
       `}
     >
       <input {...getInputProps()} />
-      
+
       {uploading ? (
         <div className="space-y-3">
           <Loader2 className="w-8 h-8 animate-spin mx-auto text-purple-600" />
           <Progress value={progress} className="w-full" />
-          <p className="text-sm text-gray-600">Uploading to secure storage...</p>
+          <p className="text-sm text-gray-600">Uploading and parsing your chat...</p>
         </div>
       ) : (
         <>
-          <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-          <p className="text-lg font-medium mb-2">
-            {isDragActive ? 'Drop file here' : 'Drag & drop WhatsApp export'}
+          <Upload className="w-10 h-10 mx-auto mb-3 text-gray-400" />
+          <p className="text-base font-medium mb-1">
+            {isDragActive ? 'Drop file here' : 'Upload a chat export'}
           </p>
-          <p className="text-sm text-gray-500 mb-4">
-            Supports .txt, .zip (WhatsApp export), .csv
+          <p className="text-sm text-gray-500 mb-3">
+            WhatsApp • Telegram • Snapchat • Instagram • TikTok • iMessage
           </p>
-          <Button type="button" variant="outline">
+          <p className="text-xs text-gray-400 mb-3">
+            Supports .txt, .zip, .json, .html, .csv
+          </p>
+          <Button type="button" variant="outline" size="sm">
             Select File
           </Button>
         </>

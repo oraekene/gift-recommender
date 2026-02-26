@@ -723,7 +723,8 @@ def analyze():
 @app.route('/api/search-similar', methods=['POST'])
 @jwt_required()
 def search_similar():
-    """Find similar products to a given gift — powers the 'More like this' button"""
+    """Find similar products to a given gift — powers the 'More like this' button.
+    Uses the same ShoppingAgent search + vet pipeline as the initial gift search."""
     try:
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
@@ -743,35 +744,54 @@ def search_similar():
         if not product:
             return jsonify({'error': 'No product specified'}), 400
         
-        search = BraveSearch(brave_key)
+        # Use the same ShoppingAgent as the main search
+        shopper = ShoppingAgent(nvidia_key, brave_key)
+        
+        # Generate 3 alternative product ideas based on the original product + pain point
         kimi = KimiClient(nvidia_key)
-        
-        # Search for alternatives
-        query = f"buy {product} alternatives similar online {location} price"
-        results = search.search(query, max_results=6)
-        
-        if not results:
-            return jsonify({'alternatives': [], 'message': 'No similar products found'})
-        
-        # Ask AI to pick top 3 alternatives from results
-        prompt = f"""The recipient is struggling with: "{pain_point}"
-They liked a product similar to "{product}". Find 3 alternative products under {budget} {currency} from these search results: {json.dumps(results)}
-Return a JSON array of up to 3 items, each with:
-- "product": product name
-- "price_guess": estimated price as number string
-- "url": product link
-- "reason": A warm, caring 1-sentence description of how this gift helps with their "{pain_point}" problem. Do NOT mention websites, platforms, or shipping.
-Return [] if nothing fits."""
+        prompt = f"""Someone struggling with "{pain_point}" was recommended "{product}".
+Suggest 3 DIFFERENT but similar product types that also directly solve "{pain_point}".
+Each should be a distinct alternative (not the same product), 2-4 words each.
+Return JSON: {{"alt1": "...", "alt2": "...", "alt3": "..."}}"""
         resp = kimi.generate(prompt)
-        
         try:
-            match = re.search(r'\[.*\]', resp.replace("\n", " "), re.DOTALL)
-            alternatives = json.loads(match.group(0)) if match else []
+            match = re.search(r'\{.*\}', resp.replace("\n", " "), re.DOTALL)
+            alt_ideas = json.loads(match.group(0)) if match else {}
         except:
-            alternatives = []
+            alt_ideas = {"alt1": product}
+        
+        # Search and vet each alternative IN PARALLEL (same as main search)
+        alternatives = []
+        total_searches = 0
+        
+        def search_and_vet_alt(item):
+            query = f"buy {item} online {location} price"
+            results = shopper.search.search(query, max_results=4)
+            if results:
+                rec = shopper.vet(item, results, budget, currency, location, pain_point)
+                if rec:
+                    # Strip technical_reason before returning
+                    clean = {k: v for k, v in rec.items() if k != 'technical_reason'}
+                    return clean
+            return None
+        
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = []
+            for key, item in alt_ideas.items():
+                if item and isinstance(item, str):
+                    futures.append(executor.submit(search_and_vet_alt, item))
+                    total_searches += 1
+            
+            for future in as_completed(futures):
+                try:
+                    rec = future.result()
+                    if rec:
+                        alternatives.append(rec)
+                except Exception as e:
+                    print(f"⚠️ Search-similar vet error: {e}")
         
         # Update search count
-        user.monthly_searches += 1
+        user.monthly_searches += total_searches
         db.session.commit()
         
         return jsonify({'alternatives': alternatives})
@@ -782,7 +802,7 @@ Return [] if nothing fits."""
 @app.route('/api/upload', methods=['POST'])
 @jwt_required()
 def upload_file():
-    """Handle WhatsApp chat file upload to R2"""
+    """Handle chat file upload — supports WhatsApp, Telegram, Snapchat, Instagram, TikTok, iMessage"""
     user_id = int(get_jwt_identity())
     
     if 'file' not in request.files:
@@ -793,10 +813,10 @@ def upload_file():
         return jsonify({'error': 'Empty filename'}), 400
     
     # Validate file type
-    allowed_extensions = {'.txt', '.zip', '.csv'}
+    allowed_extensions = {'.txt', '.zip', '.csv', '.json', '.html'}
     file_ext = os.path.splitext(file.filename)[1].lower()
     if file_ext not in allowed_extensions:
-        return jsonify({'error': f'Invalid file type. Allowed: {allowed_extensions}'}), 400
+        return jsonify({'error': f'Invalid file type. Allowed: .txt, .zip, .csv, .json, .html'}), 400
     
     # Validate file size (max 10MB)
     file_data = file.read()
@@ -825,22 +845,8 @@ def upload_file():
     db.session.add(chat_file)
     db.session.commit()
     
-    # Extract text content for immediate analysis
-    try:
-        if file_ext == '.zip':
-            import zipfile
-            import io
-            with zipfile.ZipFile(io.BytesIO(file_data)) as z:
-                # Find _chat.txt inside zip
-                chat_txt = [f for f in z.namelist() if '_chat.txt' in f]
-                if chat_txt:
-                    content = z.read(chat_txt[0]).decode('utf-8', errors='ignore')
-                else:
-                    content = z.read(z.namelist()[0]).decode('utf-8', errors='ignore')
-        else:
-            content = file_data.decode('utf-8', errors='ignore')
-    except Exception as e:
-        content = None
+    # Parse chat content from various platforms
+    content = parse_chat_file(file_data, file_ext, file.filename)
     
     return jsonify({
         'success': True,
@@ -848,8 +854,261 @@ def upload_file():
         'file_url': file_url,
         'file_size': len(file_data),
         'content_preview': content[:1000] if content else None,
-        'full_content': content if len(content) < 50000 else None  # Return full if under 50KB
+        'full_content': content if content and len(content) < 50000 else None
     })
+
+
+def parse_chat_file(file_data, file_ext, filename=''):
+    """Parse chat file from multiple platforms into a unified format.
+    Supported: WhatsApp, Telegram, Snapchat, Instagram, TikTok, iMessage.
+    Output format: [date] sender: message (one per line)"""
+    try:
+        # ZIP files (WhatsApp export)
+        if file_ext == '.zip':
+            import zipfile
+            import io
+            with zipfile.ZipFile(io.BytesIO(file_data)) as z:
+                # WhatsApp zips contain _chat.txt
+                chat_txt = [f for f in z.namelist() if '_chat.txt' in f or f.endswith('.txt')]
+                if chat_txt:
+                    raw = z.read(chat_txt[0]).decode('utf-8', errors='ignore')
+                    return raw  # WhatsApp .txt is already in usable format
+                # Could also contain .json (Telegram desktop export)
+                json_files = [f for f in z.namelist() if f.endswith('.json')]
+                if json_files:
+                    raw = z.read(json_files[0]).decode('utf-8', errors='ignore')
+                    return parse_json_chat(raw, filename)
+                return z.read(z.namelist()[0]).decode('utf-8', errors='ignore')
+        
+        raw_text = file_data.decode('utf-8', errors='ignore')
+        
+        # JSON files — detect platform and parse
+        if file_ext == '.json':
+            return parse_json_chat(raw_text, filename)
+        
+        # HTML files — Telegram HTML export
+        if file_ext == '.html':
+            return parse_html_chat(raw_text)
+        
+        # CSV files — iMessage / generic CSV
+        if file_ext == '.csv':
+            return parse_csv_chat(raw_text)
+        
+        # .txt files — WhatsApp or generic text
+        return raw_text
+        
+    except Exception as e:
+        print(f"⚠️ Chat parse error: {e}")
+        # Fall back to raw text
+        try:
+            return file_data.decode('utf-8', errors='ignore')
+        except:
+            return None
+
+
+def parse_json_chat(raw_text, filename=''):
+    """Parse JSON chat exports from Telegram, Snapchat, Instagram, TikTok"""
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return raw_text  # Not valid JSON, return as-is
+    
+    lines = []
+    
+    # --- Telegram JSON export ---
+    # Structure: {"messages": [{"from": "...", "date": "...", "text": "..."}]}
+    if isinstance(data, dict) and 'messages' in data:
+        for msg in data['messages']:
+            if msg.get('type') != 'message':
+                continue
+            sender = msg.get('from', msg.get('from_id', 'Unknown'))
+            date = msg.get('date', '')[:10]  # YYYY-MM-DD
+            text = msg.get('text', '')
+            # Telegram text can be a list of objects for formatted text
+            if isinstance(text, list):
+                text = ''.join(
+                    part if isinstance(part, str) else part.get('text', '')
+                    for part in text
+                )
+            if text.strip():
+                lines.append(f"[{date}] {sender}: {text.strip()}")
+        if lines:
+            return '\n'.join(lines)
+    
+    # --- Instagram JSON export ---
+    # Structure: {"participants": [...], "messages": [{"sender_name": "...", "timestamp_ms": ..., "content": "..."}]}
+    if isinstance(data, dict) and 'participants' in data and 'messages' in data:
+        for msg in sorted(data['messages'], key=lambda m: m.get('timestamp_ms', 0)):
+            sender = msg.get('sender_name', 'Unknown')
+            # Fix Instagram's UTF-8 encoding issue
+            try:
+                sender = sender.encode('latin1').decode('utf-8')
+            except:
+                pass
+            ts = msg.get('timestamp_ms', 0)
+            from datetime import datetime as dt
+            date = dt.fromtimestamp(ts / 1000).strftime('%m/%d/%y') if ts else ''
+            content = msg.get('content', '')
+            try:
+                content = content.encode('latin1').decode('utf-8')
+            except:
+                pass
+            if content.strip():
+                lines.append(f"[{date}] {sender}: {content.strip()}")
+        if lines:
+            return '\n'.join(lines)
+    
+    # --- Snapchat JSON export ---
+    # Structure: [{"From": "...", "Created": "...", "Content": "..."}] or {"Saved Messages": [...]}
+    if isinstance(data, list):
+        for msg in data:
+            sender = msg.get('From', msg.get('sender', msg.get('from', 'Unknown')))
+            date = msg.get('Created', msg.get('date', msg.get('timestamp', '')))[:10]
+            content = msg.get('Content', msg.get('content', msg.get('text', msg.get('message', ''))))
+            if content and str(content).strip():
+                lines.append(f"[{date}] {sender}: {str(content).strip()}")
+        if lines:
+            return '\n'.join(lines)
+    
+    if isinstance(data, dict) and 'Saved Messages' in data:
+        for msg in data['Saved Messages']:
+            sender = msg.get('From', 'Unknown')
+            date = msg.get('Created', '')[:10]
+            content = msg.get('Content', '')
+            if content.strip():
+                lines.append(f"[{date}] {sender}: {content.strip()}")
+        if lines:
+            return '\n'.join(lines)
+    
+    # --- TikTok JSON export ---
+    # Structure: {"ChatHistory": {"ChatHistory": [{"From": "...", "Date": "...", "Content": "..."}]}}
+    if isinstance(data, dict) and 'ChatHistory' in data:
+        chat_hist = data['ChatHistory']
+        if isinstance(chat_hist, dict) and 'ChatHistory' in chat_hist:
+            chat_hist = chat_hist['ChatHistory']
+        if isinstance(chat_hist, list):
+            for msg in chat_hist:
+                sender = msg.get('From', 'Unknown')
+                date = msg.get('Date', '')[:10]
+                content = msg.get('Content', '')
+                if content.strip():
+                    lines.append(f"[{date}] {sender}: {content.strip()}")
+            if lines:
+                return '\n'.join(lines)
+    
+    # --- Generic JSON fallback ---
+    # Try to find any array of message-like objects
+    for key, val in (data.items() if isinstance(data, dict) else []):
+        if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict):
+            for msg in val:
+                sender = (msg.get('from') or msg.get('sender') or msg.get('From') or 
+                         msg.get('sender_name') or msg.get('author') or 'Unknown')
+                content = (msg.get('text') or msg.get('content') or msg.get('Content') or 
+                          msg.get('message') or msg.get('body') or '')
+                if str(content).strip():
+                    lines.append(f"{sender}: {str(content).strip()}")
+            if lines:
+                return '\n'.join(lines)
+    
+    return raw_text
+
+
+def parse_html_chat(raw_text):
+    """Parse HTML chat exports (primarily Telegram HTML export)"""
+    from html.parser import HTMLParser
+    
+    class TelegramHTMLParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.messages = []
+            self.current_sender = ''
+            self.current_text = ''
+            self.current_date = ''
+            self.in_sender = False
+            self.in_text = False
+            self.in_date = False
+            
+        def handle_starttag(self, tag, attrs):
+            attrs_dict = dict(attrs)
+            cls = attrs_dict.get('class', '')
+            if 'from_name' in cls:
+                self.in_sender = True
+                self.current_sender = ''
+            elif 'text' in cls and tag == 'div':
+                self.in_text = True
+                self.current_text = ''
+            elif 'date' in cls:
+                self.in_date = True
+                # Telegram puts date in title attribute
+                self.current_date = attrs_dict.get('title', '')[:10]
+                
+        def handle_endtag(self, tag):
+            if self.in_sender:
+                self.in_sender = False
+            if self.in_text and tag == 'div':
+                self.in_text = False
+                if self.current_text.strip():
+                    self.messages.append(
+                        f"[{self.current_date}] {self.current_sender}: {self.current_text.strip()}"
+                    )
+            if self.in_date:
+                self.in_date = False
+                
+        def handle_data(self, data):
+            if self.in_sender:
+                self.current_sender += data.strip()
+            elif self.in_text:
+                self.current_text += data
+    
+    try:
+        parser = TelegramHTMLParser()
+        parser.feed(raw_text)
+        if parser.messages:
+            return '\n'.join(parser.messages)
+    except:
+        pass
+    
+    # Fallback: strip all HTML tags and return plain text
+    import re as re_module
+    clean = re_module.sub(r'<[^>]+>', ' ', raw_text)
+    clean = re_module.sub(r'\s+', ' ', clean).strip()
+    return clean
+
+
+def parse_csv_chat(raw_text):
+    """Parse CSV chat exports (iMessage/generic CSV)"""
+    import csv
+    import io
+    
+    lines = []
+    try:
+        reader = csv.DictReader(io.StringIO(raw_text))
+        headers = [h.lower() for h in (reader.fieldnames or [])]
+        
+        # Find the right column names
+        sender_col = next((h for h in reader.fieldnames or [] 
+                          if h.lower() in ['sender', 'from', 'name', 'handle', 'contact', 'phone']), None)
+        text_col = next((h for h in reader.fieldnames or [] 
+                        if h.lower() in ['text', 'message', 'body', 'content', 'imessage']), None)
+        date_col = next((h for h in reader.fieldnames or [] 
+                        if h.lower() in ['date', 'timestamp', 'time', 'datetime', 'sent']), None)
+        
+        if text_col:
+            for row in reader:
+                sender = row.get(sender_col, 'Unknown') if sender_col else 'Unknown'
+                text = row.get(text_col, '')
+                date = row.get(date_col, '') if date_col else ''
+                if date:
+                    date = date[:10]
+                if text and text.strip():
+                    lines.append(f"[{date}] {sender}: {text.strip()}")
+        
+        if lines:
+            return '\n'.join(lines)
+    except Exception as e:
+        print(f"⚠️ CSV parse error: {e}")
+    
+    return raw_text
 
 @app.route('/api/files', methods=['GET'])
 @jwt_required()

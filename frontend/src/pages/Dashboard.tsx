@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { api } from '@/lib/api'
@@ -28,8 +28,13 @@ import {
   DollarSign,
   User,
   Loader2,
-  Search
+  Search,
+  Upload,
+  Heart,
+  ShoppingBag,
+  Stars
 } from 'lucide-react'
+import { FileUpload } from '@/components/FileUpload'
 
 const DEMO_CHAT = `[11/15/24] Partner: Ugh, my lower back is killing me after that long drive yesterday.
 [11/16/24] Partner: My eyes feel so strained from staring at screens all day.
@@ -48,6 +53,12 @@ export function Dashboard() {
   const { toast } = useToast()
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [progressText, setProgressText] = useState('')
+  const [subscription, setSubscription] = useState({
+    tier: 'free',
+    searches_this_month: 0,
+    search_limit: 50,
+  })
 
   const [formData, setFormData] = useState({
     recipient: 'Partner',
@@ -56,20 +67,59 @@ export function Dashboard() {
     currency: 'USD',
     chat_log: '',
     max_results: 4,
+    file_id: null as number | null,
   })
+
+  // Fetch actual subscription data
+  useEffect(() => {
+    const fetchSub = async () => {
+      try {
+        const { data } = await api.get('/api/user/subscription')
+        setSubscription({
+          tier: data.tier || 'free',
+          searches_this_month: data.searches_this_month || 0,
+          search_limit: data.search_limit || 50,
+        })
+      } catch (error) {
+        console.error('Failed to load subscription:', error)
+      }
+    }
+    fetchSub()
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsAnalyzing(true)
-    setProgress(10)
+    setProgress(5)
+    setProgressText('Reading your conversations...')
+
+    // Animate progress smoothly during the long API call
+    const stages = [
+      { at: 1000, progress: 15, text: 'Understanding their frustrations...' },
+      { at: 3000, progress: 30, text: 'Identifying what matters most...' },
+      { at: 8000, progress: 45, text: 'Brainstorming the perfect gifts...' },
+      { at: 15000, progress: 55, text: 'Searching for the best options nearby...' },
+      { at: 25000, progress: 70, text: 'Comparing prices and quality...' },
+      { at: 40000, progress: 80, text: 'Picking the most thoughtful choices...' },
+      { at: 60000, progress: 88, text: 'Almost there, finalizing your picks...' },
+    ]
+
+    const timers = stages.map(({ at, progress: p, text }) =>
+      setTimeout(() => {
+        setProgress(p)
+        setProgressText(text)
+      }, at)
+    )
 
     try {
-      setProgress(30)
       const { data } = await api.post('/api/analyze', formData)
+      timers.forEach(clearTimeout)
       setProgress(100)
+      setProgressText('Done! Redirecting...')
 
-      navigate(`/results/${data.analysis_id}`)
+      setTimeout(() => navigate(`/results/${data.analysis_id}`), 500)
     } catch (error: any) {
+      timers.forEach(clearTimeout)
       const message = error.response?.data?.error || 'Analysis failed'
 
       if (error.response?.status === 429) {
@@ -88,17 +138,26 @@ export function Dashboard() {
       }
     } finally {
       setIsAnalyzing(false)
+      setProgress(0)
     }
   }
 
   const loadDemo = () => {
-    setFormData({ ...formData, chat_log: DEMO_CHAT })
+    setFormData({ ...formData, chat_log: DEMO_CHAT, file_id: null })
+  }
+
+  const handleFileUploaded = (fileId: number, content: string) => {
+    setFormData({ ...formData, chat_log: content, file_id: fileId })
   }
 
   const handleLogout = () => {
     logout()
     navigate('/login')
   }
+
+  const quotaPercent = subscription.search_limit > 0
+    ? (subscription.searches_this_month / subscription.search_limit) * 100
+    : 0
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -167,7 +226,7 @@ export function Dashboard() {
                   New Analysis
                 </CardTitle>
                 <CardDescription>
-                  Paste a WhatsApp chat or describe someone's complaints
+                  Paste a chat or upload a conversation export
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -231,9 +290,18 @@ export function Dashboard() {
                     </div>
                   </div>
 
+                  {/* File Upload */}
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <Upload className="w-4 h-4" />
+                      Upload Chat Export
+                    </Label>
+                    <FileUpload onFileUploaded={handleFileUploaded} />
+                  </div>
+
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <Label htmlFor="chat">Chat Log or Complaints</Label>
+                      <Label htmlFor="chat">Or Paste Chat Log</Label>
                       <Button
                         type="button"
                         variant="ghost"
@@ -247,37 +315,16 @@ export function Dashboard() {
                       id="chat"
                       value={formData.chat_log}
                       onChange={(e) => setFormData({ ...formData, chat_log: e.target.value })}
-                      placeholder="[12/01/24] Partner: My neck is so stiff...
-[12/02/24] Partner: I'm freezing in this office..."
+                      placeholder="Paste your chat messages here..."
                       className="min-h-[200px] font-mono text-sm"
                     />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Search Depth (results per query)</Label>
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="range"
-                        min="1"
-                        max="10"
-                        value={formData.max_results}
-                        onChange={(e) => setFormData({ ...formData, max_results: parseInt(e.target.value) })}
-                        className="flex-1"
-                      />
-                      <span className="w-12 text-center font-medium">{formData.max_results}</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Higher = more options but uses more API quota
-                    </p>
                   </div>
 
                   {isAnalyzing && (
                     <div className="space-y-2">
                       <Progress value={progress} className="h-2" />
                       <p className="text-sm text-center text-muted-foreground">
-                        {progress < 30 ? 'Analyzing pain points...' :
-                          progress < 100 ? 'Searching for gifts...' :
-                            'Finalizing results...'}
+                        {progressText}
                       </p>
                     </div>
                   )}
@@ -314,34 +361,34 @@ export function Dashboard() {
               <CardContent className="space-y-4">
                 <div className="flex gap-3">
                   <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
-                    <span className="text-sm font-bold text-purple-600">1</span>
+                    <Heart className="w-4 h-4 text-purple-600" />
                   </div>
                   <div>
-                    <p className="font-medium">AI Analysis</p>
+                    <p className="font-medium">We Listen</p>
                     <p className="text-sm text-muted-foreground">
-                      Gemini AI extracts pain points from your chat
+                      We read between the lines to discover what truly matters to them
                     </p>
                   </div>
                 </div>
                 <div className="flex gap-3">
                   <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
-                    <span className="text-sm font-bold text-purple-600">2</span>
+                    <ShoppingBag className="w-4 h-4 text-purple-600" />
                   </div>
                   <div>
-                    <p className="font-medium">Smart Search</p>
+                    <p className="font-medium">We Search</p>
                     <p className="text-sm text-muted-foreground">
-                      Brave finds products in their location
+                      We scour local stores and shops to find the perfect match near them
                     </p>
                   </div>
                 </div>
                 <div className="flex gap-3">
                   <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
-                    <span className="text-sm font-bold text-purple-600">3</span>
+                    <Stars className="w-4 h-4 text-purple-600" />
                   </div>
                   <div>
-                    <p className="font-medium">Curated Matches</p>
+                    <p className="font-medium">We Deliver Joy</p>
                     <p className="text-sm text-muted-foreground">
-                      Budget-friendly options ranked by relevance
+                      Handpicked gifts that fit your budget and make them feel truly cared for
                     </p>
                   </div>
                 </div>
@@ -354,12 +401,12 @@ export function Dashboard() {
               </CardHeader>
               <CardContent>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="capitalize font-medium">{user?.subscription_tier || 'Free'}</span>
-                  <span className="text-sm text-muted-foreground">50 searches/mo</span>
+                  <span className="capitalize font-medium">{subscription.tier}</span>
+                  <span className="text-sm text-muted-foreground">{subscription.search_limit} searches/mo</span>
                 </div>
-                <Progress value={30} className="h-2" />
+                <Progress value={quotaPercent} className="h-2" />
                 <p className="text-sm text-muted-foreground mt-2">
-                  15 of 50 searches used this month
+                  {subscription.searches_this_month} of {subscription.search_limit} searches used this month
                 </p>
                 <Button
                   variant="outline"
