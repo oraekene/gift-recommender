@@ -491,6 +491,60 @@ recommending to a friend.", "technical_reason": "Detailed technical analysis of 
             pass
         return None
 
+# Common URL patterns that indicate search/category pages rather than product pages
+SEARCH_URL_PATTERNS = ['/search?', '/search/', '/s?', '/s/', '/catalog/', '/category/',
+                       'query=', '/mlp_', '/sp?', '/find/', '/browse/', '/results?']
+
+def refine_local_results(brave_search, item, initial_results):
+    """Adaptive two-step refinement: detects which domains returned search/category 
+    URLs instead of product pages, then does a targeted follow-up search on those 
+    specific domains to find actual product listing pages. Works for any platform."""
+    from urllib.parse import urlparse
+    
+    refined = []
+    domains_needing_refinement = set()
+    
+    for r in initial_results:
+        href = r.get('href', '')
+        
+        # Check if this URL looks like a search/category page
+        is_search_page = any(pattern in href.lower() for pattern in SEARCH_URL_PATTERNS)
+        
+        if is_search_page:
+            # Extract the domain from this search URL
+            try:
+                domain = urlparse(href).netloc.replace('www.', '')
+                if domain:
+                    domains_needing_refinement.add(domain)
+            except:
+                pass
+        else:
+            refined.append(r)  # Keep — this is likely a product page
+    
+    # For each domain that only returned search URLs, do a targeted search
+    for domain in domains_needing_refinement:
+        try:
+            targeted_query = f"{item} site:{domain}"
+            targeted_results = brave_search.search(targeted_query, max_results=3)
+            
+            if targeted_results:
+                for tr in targeted_results:
+                    tr_href = tr.get('href', '').lower()
+                    # Only add if it's NOT still a search/category page
+                    if not any(pattern in tr_href for pattern in SEARCH_URL_PATTERNS):
+                        refined.insert(0, tr)  # Prioritize refined results
+                
+                # If refinement still only got search URLs, keep the best one as fallback
+                if not any(domain in r.get('href', '') for r in refined):
+                    refined.append(targeted_results[0])
+            
+            print(f"🔍 Refinement for {domain}: found {len(targeted_results) if targeted_results else 0} results")
+        except Exception as e:
+            print(f"⚠️ Refinement search failed for {domain}: {e}")
+    
+    # If refinement found nothing new, fall back to original results
+    return refined if refined else initial_results
+
 # Routes
 
 @app.route('/api/auth/google', methods=['POST'])
@@ -641,6 +695,12 @@ def analyze():
         def search_and_vet(strategy, item):
             query = f"buy {item} online {location} price"
             results = shopper.search.search(query, max_results=max_results)
+            
+            if results:
+                # Refinement: for Nigerian platforms that returned search/category URLs,
+                # do a targeted second search to find specific product pages
+                results = refine_local_results(shopper.search, item, results)
+            
             if results:
                 rec = shopper.vet(item, results, budget, currency, location, pain_text)
                 if rec:
