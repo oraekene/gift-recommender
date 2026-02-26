@@ -13,7 +13,9 @@ import {
   TrendingUp,
   MapPin,
   DollarSign,
-  Search
+  Search,
+  Loader2,
+  X
 } from 'lucide-react'
 
 interface PainPoint {
@@ -24,7 +26,7 @@ interface PainPoint {
   context: string
 }
 
-interface Gift {
+interface GiftItem {
   strategy: string
   solution_item: string
   product: string
@@ -35,12 +37,19 @@ interface Gift {
   pain_score: number
 }
 
+interface Alternative {
+  product: string
+  price_guess: string
+  url: string
+  reason: string
+}
+
 export function Results() {
   const { analysisId } = useParams()
   const navigate = useNavigate()
   const [data, setData] = useState<{
     pains: PainPoint[]
-    gifts: Gift[]
+    gifts: GiftItem[]
     search_count: number
     recipient: string
     location: string
@@ -48,6 +57,8 @@ export function Results() {
     currency: string
   } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [searchingIdx, setSearchingIdx] = useState<number | null>(null)
+  const [alternatives, setAlternatives] = useState<Record<number, Alternative[]>>({})
 
   useEffect(() => {
     const fetchData = async () => {
@@ -62,6 +73,33 @@ export function Results() {
     }
     fetchData()
   }, [analysisId])
+
+  const handleMoreLikeThis = async (gift: GiftItem, idx: number) => {
+    if (searchingIdx !== null) return
+    setSearchingIdx(idx)
+    try {
+      const { data: response } = await api.post('/api/search-similar', {
+        product: gift.product,
+        pain_point: gift.pain_point,
+        budget: data?.budget || '100',
+        currency: data?.currency || 'USD',
+        location: data?.location || '',
+      })
+      setAlternatives((prev) => ({ ...prev, [idx]: response.alternatives || [] }))
+    } catch (error) {
+      console.error('Search similar failed:', error)
+    } finally {
+      setSearchingIdx(null)
+    }
+  }
+
+  const dismissAlternatives = (idx: number) => {
+    setAlternatives((prev) => {
+      const next = { ...prev }
+      delete next[idx]
+      return next
+    })
+  }
 
   if (loading) {
     return (
@@ -171,42 +209,113 @@ export function Results() {
             </h2>
             <div className="space-y-4">
               {data.gifts.map((gift, idx) => (
-                <Card key={idx} className="overflow-hidden hover:shadow-lg transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <Badge className={`mb-2 ${getStrategyColor(gift.strategy)}`}>
-                          {gift.strategy}
-                        </Badge>
-                        <h3 className="text-xl font-semibold">{gift.product}</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Solves: {gift.pain_point} (Score: {gift.pain_score}/10)
-                        </p>
+                <div key={idx}>
+                  <Card className="overflow-hidden hover:shadow-lg transition-shadow">
+                    <CardContent className="p-6">
+                      <div className="flex items-start justify-between mb-4">
+                        <div>
+                          <Badge className={`mb-2 ${getStrategyColor(gift.strategy)}`}>
+                            {gift.strategy}
+                          </Badge>
+                          <h3 className="text-xl font-semibold">{gift.product}</h3>
+                          <p className="text-sm text-muted-foreground">
+                            Solves: {gift.pain_point} (Score: {gift.pain_score}/10)
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-green-600">
+                            {gift.price_guess} {data.currency}
+                          </p>
+                          <p className="text-sm text-muted-foreground">estimated</p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-2xl font-bold text-green-600">
-                          {gift.price_guess} {data.currency}
-                        </p>
-                        <p className="text-sm text-muted-foreground">estimated</p>
+
+                      <p className="text-sm text-gray-600 mb-4">{gift.reason}</p>
+
+                      <div className="flex gap-3">
+                        <Button asChild>
+                          <a href={gift.url} target="_blank" rel="noopener noreferrer">
+                            <ExternalLink className="w-4 h-4 mr-2" />
+                            View Product
+                          </a>
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={searchingIdx !== null}
+                          onClick={() => handleMoreLikeThis(gift, idx)}
+                        >
+                          {searchingIdx === idx ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Searching...
+                            </>
+                          ) : (
+                            <>
+                              <Search className="w-4 h-4 mr-2" />
+                              More like this
+                            </>
+                          )}
+                        </Button>
                       </div>
-                    </div>
+                    </CardContent>
+                  </Card>
 
-                    <p className="text-sm text-gray-600 mb-4">{gift.reason}</p>
-
-                    <div className="flex gap-3">
-                      <Button asChild>
-                        <a href={gift.url} target="_blank" rel="noopener noreferrer">
-                          <ExternalLink className="w-4 h-4 mr-2" />
-                          View Product
-                        </a>
-                      </Button>
-                      <Button variant="outline" size="sm">
-                        <Search className="w-4 h-4 mr-2" />
-                        More like this
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                  {/* Alternatives panel */}
+                  {alternatives[idx] && (
+                    <Card className="mt-2 border-dashed border-purple-300 bg-purple-50/50">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="text-sm font-semibold text-purple-700">
+                            Similar alternatives
+                          </p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => dismissAlternatives(idx)}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                        {alternatives[idx].length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            No similar products found. Try adjusting your budget.
+                          </p>
+                        ) : (
+                          <div className="space-y-3">
+                            {alternatives[idx].map((alt, altIdx) => (
+                              <div
+                                key={altIdx}
+                                className="flex items-start justify-between p-3 bg-white rounded-lg border"
+                              >
+                                <div className="flex-1 mr-4">
+                                  <p className="font-medium text-sm">{alt.product}</p>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {alt.reason}
+                                  </p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <p className="font-bold text-green-600 text-sm">
+                                    {alt.price_guess} {data.currency}
+                                  </p>
+                                  <a
+                                    href={alt.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-purple-600 hover:underline inline-flex items-center gap-1 mt-1"
+                                  >
+                                    View <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
               ))}
             </div>
 

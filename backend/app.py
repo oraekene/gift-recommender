@@ -13,6 +13,7 @@ import uuid
 import hmac
 import hashlib
 from cryptography.fernet import Fernet
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import stripe
 from authlib.integrations.flask_client import OAuth
 import redis
@@ -639,23 +640,34 @@ def analyze():
         # Brainstorm 3 gift ideas (practical, splurge, thoughtful) for the top pain point
         ideas = shopper.brainstorm(pain_text, location)
         
-        # Search and vet each strategy independently to get one gift per category
-        for strategy in ['practical', 'splurge', 'thoughtful']:
-            item = ideas.get(strategy)
-            if not item or not isinstance(item, str):
-                continue
-            
+        # Search and vet each strategy IN PARALLEL for speed
+        def search_and_vet(strategy, item):
             query = f"buy {item} online {location} price"
             results = shopper.search.search(query, max_results=max_results)
-            total_searches += 1
-            
             if results:
                 rec = shopper.vet(item, results, budget, currency, location, pain_text)
                 if rec:
                     rec['strategy'] = strategy
                     rec['pain_point'] = pain_text
                     rec['pain_score'] = pain_score
-                    gifts.append(rec)
+                    return rec
+            return None
+        
+        tasks = []
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            for strategy in ['practical', 'splurge', 'thoughtful']:
+                item = ideas.get(strategy)
+                if item and isinstance(item, str):
+                    tasks.append(executor.submit(search_and_vet, strategy, item))
+                    total_searches += 1
+            
+            for future in as_completed(tasks):
+                try:
+                    rec = future.result()
+                    if rec:
+                        gifts.append(rec)
+                except Exception as e:
+                    print(f"⚠️ Search/vet error: {e}")
     
     # Log technical details for developer (backend only)
     saved_calls = (len(pains) * 3) - total_searches
@@ -707,6 +719,65 @@ def analyze():
     import traceback
     traceback.print_exc()
     return jsonify({'error': f'Analysis failed: {str(e)}'}), 500
+
+@app.route('/api/search-similar', methods=['POST'])
+@jwt_required()
+def search_similar():
+    """Find similar products to a given gift — powers the 'More like this' button"""
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        
+        brave_key = BRAVE_API_KEY
+        nvidia_key = NVIDIA_API_KEY
+        if not brave_key or not nvidia_key:
+            return jsonify({'error': 'Service temporarily unavailable.'}), 503
+        
+        data = request.get_json()
+        product = data.get('product', '')
+        pain_point = data.get('pain_point', '')
+        budget = data.get('budget', '100')
+        currency = data.get('currency', 'USD')
+        location = data.get('location', 'Lagos, Nigeria')
+        
+        if not product:
+            return jsonify({'error': 'No product specified'}), 400
+        
+        search = BraveSearch(brave_key)
+        kimi = KimiClient(nvidia_key)
+        
+        # Search for alternatives
+        query = f"buy {product} alternatives similar online {location} price"
+        results = search.search(query, max_results=6)
+        
+        if not results:
+            return jsonify({'alternatives': [], 'message': 'No similar products found'})
+        
+        # Ask AI to pick top 3 alternatives from results
+        prompt = f"""The recipient is struggling with: "{pain_point}"
+They liked a product similar to "{product}". Find 3 alternative products under {budget} {currency} from these search results: {json.dumps(results)}
+Return a JSON array of up to 3 items, each with:
+- "product": product name
+- "price_guess": estimated price as number string
+- "url": product link
+- "reason": A warm, caring 1-sentence description of how this gift helps with their "{pain_point}" problem. Do NOT mention websites, platforms, or shipping.
+Return [] if nothing fits."""
+        resp = kimi.generate(prompt)
+        
+        try:
+            match = re.search(r'\[.*\]', resp.replace("\n", " "), re.DOTALL)
+            alternatives = json.loads(match.group(0)) if match else []
+        except:
+            alternatives = []
+        
+        # Update search count
+        user.monthly_searches += 1
+        db.session.commit()
+        
+        return jsonify({'alternatives': alternatives})
+    except Exception as e:
+        print(f"❌ Search-similar error: {e}")
+        return jsonify({'error': 'Search failed'}), 500
 
 @app.route('/api/upload', methods=['POST'])
 @jwt_required()
