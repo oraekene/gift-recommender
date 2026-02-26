@@ -474,21 +474,19 @@ Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}"""
         prompt = f"""The recipient is struggling with: "{pain_point}"
 We searched for "{item}" to help them. Here are {len(results[:5])} search results: {json.dumps(results[:5])}
 
-CRITICAL RULES:
-1. You MUST select a result whose URL ("href") leads to a SPECIFIC PRODUCT PAGE (e.g. jiji.ng/lagos/furniture/abcde.html, amazon.com/dp/B09XYZ, jumia.com.ng/product-name-12345.html). 
-   NEVER select a URL that is a search results page, category page, or homepage (e.g. jiji.ng/lagos/search?query=..., jumia.com.ng/category/...).
-   If a URL contains "/search?", "/s?", "/catalog/", or looks like a listing/search page, SKIP IT.
-2. "price_guess" MUST be a real price you can see in the result title or description ("body"). If no price is visible, look for price patterns like ₦XX,XXX or $XX. Do NOT invent or guess prices.
-3. "url" MUST be copied exactly from the "href" field of the selected result. Do NOT modify or create URLs.
+RULES:
+1. PREFER results whose URL ("href") leads to a specific product page (e.g. jiji.ng/lagos/furniture/abcde.html, amazon.com/dp/B09XYZ, jumia.com.ng/product-name-12345.html). Avoid search result pages or category pages if possible.
+2. "price_guess" should be a real price from the result title or description ("body"). Look for price patterns like ₦XX,XXX or $XX. If no exact price is visible, give your best estimate based on the description.
+3. "url" MUST be copied exactly from the "href" field of a result. Do NOT invent URLs.
 
 Return JSON:
-- "product": the exact product name from the search result title
-- "price_guess": the actual price extracted from the result (number only, no currency symbol)
-- "url": the exact "href" from the chosen search result (must be a specific product page)
+- "product": the product name from the search result
+- "price_guess": price as a number string (no currency symbol)
+- "url": the exact "href" from the chosen result
 - "reason": A warm 1-2 sentence description of how this gift helps solve their "{pain_point}". Do NOT mention the website, shipping, or pricing. Write as a thoughtful friend.
-- "technical_reason": Technical analysis for developer logs: why this URL was selected, price source, platform details.
+- "technical_reason": Technical analysis for developer logs only.
 
-Return {{}} if no result has a specific product page URL, or if all results are search/category pages, or if nothing is under {budget} {currency}."""
+Return {{}} if nothing is under {budget} {currency}."""
         resp = self.kimi.generate(prompt)
         try:
             match = re.search(r'\{.*\}', resp.replace("\n", " "), re.DOTALL)
@@ -651,9 +649,12 @@ def analyze():
         
         # Search and vet each strategy IN PARALLEL for speed
         def search_and_vet(strategy, item):
-            # Query targets specific product listings on local e-commerce platforms
-            query = f"{item} for sale {location} site:jiji.ng OR site:jumia.com.ng OR site:konga.com OR site:amazon.com price"
+            # Search for specific product listings with price in the location
+            query = f"{item} price {location}"
             results = shopper.search.search(query, max_results=max(max_results, 6))
+            # Fallback with broader query if no results
+            if not results:
+                results = shopper.search.search(f"buy {item} online {location}", max_results=6)
             if results:
                 rec = shopper.vet(item, results, budget, currency, location, pain_text)
                 if rec:
@@ -775,8 +776,10 @@ Return JSON: {{"alt1": "...", "alt2": "...", "alt3": "..."}}"""
         total_searches = 0
         
         def search_and_vet_alt(item):
-            query = f"{item} for sale {location} site:jiji.ng OR site:jumia.com.ng OR site:konga.com OR site:amazon.com price"
+            query = f"{item} price {location}"
             results = shopper.search.search(query, max_results=6)
+            if not results:
+                results = shopper.search.search(f"buy {item} online {location}", max_results=6)
             if results:
                 rec = shopper.vet(item, results, budget, currency, location, pain_point)
                 if rec:
