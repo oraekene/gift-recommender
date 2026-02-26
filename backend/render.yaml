@@ -17,7 +17,8 @@ services:
         sync: false  # You'll add Supabase URL manually
       - key: NVIDIA_API_KEY
         sync: false  # Manual entry required
-      # Remove: GEMINI_API_KEY
+      - key: SERPER_API_KEY
+        sync: false  # Manual entry required
       # APIs
       - key: GOOGLE_CLIENT_ID
         sync: false

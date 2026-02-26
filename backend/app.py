@@ -74,7 +74,7 @@ stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')
 
 # App-level API keys (set by developer, not per-user)
-BRAVE_API_KEY = os.environ.get('BRAVE_API_KEY')
+SERPER_API_KEY = os.environ.get('SERPER_API_KEY')
 NVIDIA_API_KEY = os.environ.get('NVIDIA_API_KEY')
 
 # Paystack config
@@ -310,26 +310,133 @@ def check_rate_limit(user_id, tier='free'):
     return True, 0
     
 # Search and Analysis Classes
-class BraveSearch:
+class SerperSearch:
+    """
+    Uses Serper.dev to search Google Shopping first (real product URLs + prices),
+    falling back to web search if shopping returns nothing.
+    Shopping results: individual product pages with verified prices.
+    Web results: fallback for markets with thin Shopping coverage.
+    """
     def __init__(self, api_key):
         self.api_key = api_key
-        self.endpoint = "https://api.search.brave.com/res/v1/web/search"
-        
-    def search(self, query, max_results=4):
-        if not self.api_key:
-            return []
-        headers = {"X-Subscription-Token": self.api_key, "Accept": "application/json"}
-        params = {"q": query, "count": max_results, "search_lang": "en"}
+        self.headers = {
+            'X-API-KEY': api_key,
+            'Content-Type': 'application/json'
+        }
+
+    def _country_code(self, location: str) -> str:
+        """
+        Derive a 2-letter ISO country code from a free-text location string.
+        Used for Serper's `gl` parameter to geo-target Shopping results.
+        Falls back to 'us' if unrecognised.
+        """
+        location_lower = location.lower()
+        country_map = {
+            'nigeria': 'ng', 'lagos': 'ng', 'abuja': 'ng', 'kano': 'ng',
+            'ghana': 'gh', 'accra': 'gh',
+            'kenya': 'ke', 'nairobi': 'ke',
+            'south africa': 'za', 'johannesburg': 'za', 'cape town': 'za',
+            'egypt': 'eg', 'cairo': 'eg',
+            'uk': 'gb', 'london': 'gb', 'england': 'gb', 'britain': 'gb',
+            'united states': 'us', 'usa': 'us', 'new york': 'us',
+            'canada': 'ca', 'toronto': 'ca',
+            'india': 'in', 'mumbai': 'in', 'delhi': 'in',
+            'pakistan': 'pk', 'karachi': 'pk',
+            'brazil': 'br', 'sao paulo': 'br',
+            'indonesia': 'id', 'jakarta': 'id',
+            'philippines': 'ph', 'manila': 'ph',
+            'bangladesh': 'bd', 'dhaka': 'bd',
+            'germany': 'de', 'berlin': 'de',
+            'france': 'fr', 'paris': 'fr',
+            'australia': 'au', 'sydney': 'au',
+        }
+        for keyword, code in country_map.items():
+            if keyword in location_lower:
+                return code
+        return 'us'  # safe fallback
+
+    def search_shopping(self, query: str, location: str, max_results: int = 4) -> list:
+        """
+        Query Google Shopping via Serper. Returns individual product listings
+        with real prices and direct product page URLs.
+        """
+        gl = self._country_code(location)
+        payload = {
+            'q': query,
+            'gl': gl,
+            'num': max_results
+        }
         try:
-            response = requests.get(self.endpoint, headers=headers, params=params, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                return [{"title": r.get("title", ""), "href": r.get("url", ""), 
-                        "body": r.get("description", "")} for r in data.get("web", {}).get("results", [])]
-            return []
+            resp = requests.post(
+                'https://google.serper.dev/shopping',
+                headers=self.headers,
+                json=payload,
+                timeout=10
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                results = []
+                for item in data.get('shopping', [])[:max_results]:
+                    results.append({
+                        'title': item.get('title', ''),
+                        'href': item.get('link', ''),
+                        'body': f"{item.get('title', '')} — {item.get('price', 'Price unknown')}",
+                        'price': item.get('price', ''),
+                        'source': item.get('source', ''),
+                        'rating': item.get('rating', ''),
+                        'is_shopping_result': True
+                    })
+                return results
         except Exception as e:
-            print(f"Search error: {e}")
-            return []
+            print(f"Serper shopping error: {e}")
+        return []
+
+    def search_web(self, query: str, location: str, max_results: int = 4) -> list:
+        """
+        Fallback: query Google organic web results via Serper.
+        Used when Shopping returns nothing (thin market coverage).
+        """
+        gl = self._country_code(location)
+        payload = {
+            'q': query,
+            'gl': gl,
+            'num': max_results
+        }
+        try:
+            resp = requests.post(
+                'https://google.serper.dev/search',
+                headers=self.headers,
+                json=payload,
+                timeout=10
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return [
+                    {
+                        'title': r.get('title', ''),
+                        'href': r.get('link', ''),
+                        'body': r.get('snippet', ''),
+                        'is_shopping_result': False
+                    }
+                    for r in data.get('organic', [])[:max_results]
+                ]
+        except Exception as e:
+            print(f"Serper web error: {e}")
+        return []
+
+    def search(self, query: str, location: str = '', max_results: int = 4) -> list:
+        """
+        Try Shopping first. If fewer than 2 results come back, fall back to web.
+        This ensures the widest global coverage while prioritising product URLs.
+        """
+        shopping = self.search_shopping(query, location, max_results)
+        if len(shopping) >= 2:
+            print(f"  🛒 Shopping results: {len(shopping)} products")
+            return shopping
+
+        print(f"  ⚠️  Shopping thin ({len(shopping)} results), falling back to web search")
+        web = self.search_web(query, location, max_results)
+        return shopping + web  # prepend any shopping we did get
 
 # class GeminiClient:
     # def __init__(self, api_key):
@@ -449,9 +556,9 @@ Chat: {chat_text[:4000]}"""
 class ShoppingAgent:
     # def __init__(self, gemini_key, brave_key):
         # self.gemini = GeminiClient(gemini_key)
-    def __init__(self, api_key, brave_key):
+    def __init__(self, api_key, serper_key):
         self.kimi = KimiClient(api_key)
-        self.search = BraveSearch(brave_key)
+        self.search = SerperSearch(serper_key)
         
     def brainstorm(self, pain_point, location):
         prompt = f"""Someone is experiencing this specific problem: "{pain_point}".
@@ -471,79 +578,40 @@ Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}"""
             return {"practical": pain_point + " solution"}
     
     def vet(self, item, results, budget, currency, location, pain_point):
-        prompt = f"""The recipient is struggling with: "{pain_point}"
-Select best product under {budget} {currency} in {location} from these {len(results[:4])} results: 
-{json.dumps(results[:4])}.
-Return JSON with: {{"product": "Name", "price_guess": "50", "url": "link from results", "reason": "A warm, natural, 
-human-friendly 1-2 sentence description of how this gift helps with their {pain_point} problem. Write as if 
-recommending to a friend.", "technical_reason": "Detailed technical analysis of pricing, availability, platform, and selection logic"}} or {{}} if over budget."""
+        # Updated prompt: extract price FROM result data, don't guess
+        shopping_results = [r for r in results if r.get('is_shopping_result')]
+        web_results = [r for r in results if not r.get('is_shopping_result')]
+        
+        price_instruction = (
+            "Extract the EXACT price shown in the result's 'price' field or 'body' text. "
+            "Do NOT guess or estimate a price if none is visible."
+            if shopping_results else
+            "If no specific price is visible in the body text, set price_guess to 'unknown'."
+        )
+        
+        prompt = f"""The recipient is in {location} and struggling with: "{pain_point}"
+Select the best product under {budget} {currency} from these results:
+{json.dumps(results[:4])}
+
+RULES:
+- url must be copied verbatim from the result's href field
+- {price_instruction}
+- Reject results whose href contains: /search, /catalog/, query=, /category/
+
+Return JSON: {{"product": "Name", "price_guess": "exact price or unknown", "url": "exact href", 
+"reason": "warm 1-2 sentence explanation", "technical_reason": "analysis"}} or {{}} if nothing qualifies."""
+        
         resp = self.kimi.generate(prompt)
         try:
             match = re.search(r'\{.*\}', resp.replace("\n", " "), re.DOTALL)
             rec = json.loads(match.group(0)) if match else {}
-            if rec.get('product') and rec.get('price_guess'):
-                try:
-                    if float(rec['price_guess']) <= float(budget):
-                        return rec
-                except:
-                    return rec
+            if rec.get('product') and rec.get('url'):
+                return rec
         except:
             pass
         return None
 
-# Common URL patterns that indicate search/category pages rather than product pages
-SEARCH_URL_PATTERNS = ['/search?', '/search/', '/s?', '/s/', '/catalog/', '/category/',
-                       'query=', '/mlp_', '/sp?', '/find/', '/browse/', '/results?']
 
-def refine_local_results(brave_search, item, initial_results):
-    """Adaptive two-step refinement: detects which domains returned search/category 
-    URLs instead of product pages, then does a targeted follow-up search on those 
-    specific domains to find actual product listing pages. Works for any platform."""
-    from urllib.parse import urlparse
-    
-    refined = []
-    domains_needing_refinement = set()
-    
-    for r in initial_results:
-        href = r.get('href', '')
-        
-        # Check if this URL looks like a search/category page
-        is_search_page = any(pattern in href.lower() for pattern in SEARCH_URL_PATTERNS)
-        
-        if is_search_page:
-            # Extract the domain from this search URL
-            try:
-                domain = urlparse(href).netloc.replace('www.', '')
-                if domain:
-                    domains_needing_refinement.add(domain)
-            except:
-                pass
-        else:
-            refined.append(r)  # Keep — this is likely a product page
-    
-    # For each domain that only returned search URLs, do a targeted search
-    for domain in domains_needing_refinement:
-        try:
-            targeted_query = f"{item} site:{domain}"
-            targeted_results = brave_search.search(targeted_query, max_results=3)
-            
-            if targeted_results:
-                for tr in targeted_results:
-                    tr_href = tr.get('href', '').lower()
-                    # Only add if it's NOT still a search/category page
-                    if not any(pattern in tr_href for pattern in SEARCH_URL_PATTERNS):
-                        refined.insert(0, tr)  # Prioritize refined results
-                
-                # If refinement still only got search URLs, keep the best one as fallback
-                if not any(domain in r.get('href', '') for r in refined):
-                    refined.append(targeted_results[0])
-            
-            print(f"🔍 Refinement for {domain}: found {len(targeted_results) if targeted_results else 0} results")
-        except Exception as e:
-            print(f"⚠️ Refinement search failed for {domain}: {e}")
-    
-    # If refinement found nothing new, fall back to original results
-    return refined if refined else initial_results
 
 # Routes
 
@@ -620,10 +688,10 @@ def analyze():
     user = User.query.get(user_id)
 
     # Use app-level API keys (set by developer)
-    brave_key = BRAVE_API_KEY
+    serper_key = SERPER_API_KEY
     nvidia_key = NVIDIA_API_KEY
     
-    if not brave_key or not nvidia_key:
+    if not serper_key or not nvidia_key:
         return jsonify({'error': 'Service temporarily unavailable. Please contact support.'}), 503
     
     # Rate limiting
@@ -676,7 +744,7 @@ def analyze():
         return jsonify({'error': 'No pain points detected — try pasting a longer or more detailed chat log.'}), 400
     
     # Phase 2: Shopping — sort pain points by score, pick the highest
-    shopper = ShoppingAgent(nvidia_key, brave_key)
+    shopper = ShoppingAgent(nvidia_key, serper_key)
     gifts = []
     total_searches = 0
     
@@ -693,13 +761,8 @@ def analyze():
         
         # Search and vet each strategy IN PARALLEL for speed
         def search_and_vet(strategy, item):
-            query = f"buy {item} online {location} price"
-            results = shopper.search.search(query, max_results=max_results)
-            
-            if results:
-                # Refinement: for Nigerian platforms that returned search/category URLs,
-                # do a targeted second search to find specific product pages
-                results = refine_local_results(shopper.search, item, results)
+            query = f"{item} {location}"
+            results = shopper.search.search(query, location=location, max_results=max_results)
             
             if results:
                 rec = shopper.vet(item, results, budget, currency, location, pain_text)
@@ -786,9 +849,9 @@ def search_similar():
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         
-        brave_key = BRAVE_API_KEY
+        serper_key = SERPER_API_KEY
         nvidia_key = NVIDIA_API_KEY
-        if not brave_key or not nvidia_key:
+        if not serper_key or not nvidia_key:
             return jsonify({'error': 'Service temporarily unavailable.'}), 503
         
         data = request.get_json()
@@ -802,7 +865,7 @@ def search_similar():
             return jsonify({'error': 'No product specified'}), 400
         
         # Use the same ShoppingAgent as the main search
-        shopper = ShoppingAgent(nvidia_key, brave_key)
+        shopper = ShoppingAgent(nvidia_key, serper_key)
         
         # Generate 3 alternative product ideas based on the original product + pain point
         kimi = KimiClient(nvidia_key)
@@ -822,8 +885,8 @@ Return JSON: {{"alt1": "...", "alt2": "...", "alt3": "..."}}"""
         total_searches = 0
         
         def search_and_vet_alt(item):
-            query = f"buy {item} online {location} price"
-            results = shopper.search.search(query, max_results=4)
+            query = f"{item} {location}"
+            results = shopper.search.search(query, location=location, max_results=4)
             if results:
                 rec = shopper.vet(item, results, budget, currency, location, pain_point)
                 if rec:

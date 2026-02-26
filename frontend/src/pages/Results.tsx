@@ -223,10 +223,18 @@ export function Results() {
                           </p>
                         </div>
                         <div className="text-right">
-                          <p className="text-2xl font-bold text-green-600">
-                            {gift.price_guess} {data.currency}
-                          </p>
-                          <p className="text-sm text-muted-foreground">estimated</p>
+                          {gift.price_guess === 'unknown' || !gift.price_guess ? (
+                            <p className="text-sm font-medium text-purple-600 hover:text-purple-700">
+                              See current prices →
+                            </p>
+                          ) : (
+                            <>
+                              <p className="text-2xl font-bold text-green-600">
+                                {gift.price_guess} {data.currency}
+                              </p>
+                              <p className="text-sm text-muted-foreground">estimated</p>
+                            </>
+                          )}
                         </div>
                       </div>
 
@@ -296,9 +304,15 @@ export function Results() {
                                   </p>
                                 </div>
                                 <div className="text-right shrink-0">
-                                  <p className="font-bold text-green-600 text-sm">
-                                    {alt.price_guess} {data.currency}
-                                  </p>
+                                  {alt.price_guess === 'unknown' || !alt.price_guess ? (
+                                    <p className="text-xs font-medium text-purple-600 hover:text-purple-700">
+                                      See price →
+                                    </p>
+                                  ) : (
+                                    <p className="font-bold text-green-600 text-sm">
+                                      {alt.price_guess} {data.currency}
+                                    </p>
+                                  )}
                                   <a
                                     href={alt.url}
                                     target="_blank"
