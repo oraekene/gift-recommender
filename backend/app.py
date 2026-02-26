@@ -472,21 +472,11 @@ Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}"""
     
     def vet(self, item, results, budget, currency, location, pain_point):
         prompt = f"""The recipient is struggling with: "{pain_point}"
-We searched for "{item}" to help them. Here are {len(results[:5])} search results: {json.dumps(results[:5])}
-
-RULES:
-1. PREFER results whose URL ("href") leads to a specific product page (e.g. jiji.ng/lagos/furniture/abcde.html, amazon.com/dp/B09XYZ, jumia.com.ng/product-name-12345.html). Avoid search result pages or category pages if possible.
-2. "price_guess" should be a real price from the result title or description ("body"). Look for price patterns like ₦XX,XXX or $XX. If no exact price is visible, give your best estimate based on the description.
-3. "url" MUST be copied exactly from the "href" field of a result. Do NOT invent URLs.
-
-Return JSON:
-- "product": the product name from the search result
-- "price_guess": price as a number string (no currency symbol)
-- "url": the exact "href" from the chosen result
-- "reason": A warm 1-2 sentence description of how this gift helps solve their "{pain_point}". Do NOT mention the website, shipping, or pricing. Write as a thoughtful friend.
-- "technical_reason": Technical analysis for developer logs only.
-
-Return {{}} if nothing is under {budget} {currency}."""
+Select best product under {budget} {currency} in {location} from these {len(results[:4])} results: 
+{json.dumps(results[:4])}.
+Return JSON with: {{"product": "Name", "price_guess": "50", "url": "link from results", "reason": "A warm, natural, 
+human-friendly 1-2 sentence description of how this gift helps with their {pain_point} problem. Write as if 
+recommending to a friend.", "technical_reason": "Detailed technical analysis of pricing, availability, platform, and selection logic"}} or {{}} if over budget."""
         resp = self.kimi.generate(prompt)
         try:
             match = re.search(r'\{.*\}', resp.replace("\n", " "), re.DOTALL)
@@ -649,12 +639,8 @@ def analyze():
         
         # Search and vet each strategy IN PARALLEL for speed
         def search_and_vet(strategy, item):
-            # Search for specific product listings with price in the location
-            query = f"{item} price {location}"
-            results = shopper.search.search(query, max_results=max(max_results, 6))
-            # Fallback with broader query if no results
-            if not results:
-                results = shopper.search.search(f"buy {item} online {location}", max_results=6)
+            query = f"buy {item} online {location} price"
+            results = shopper.search.search(query, max_results=max_results)
             if results:
                 rec = shopper.vet(item, results, budget, currency, location, pain_text)
                 if rec:
@@ -776,10 +762,8 @@ Return JSON: {{"alt1": "...", "alt2": "...", "alt3": "..."}}"""
         total_searches = 0
         
         def search_and_vet_alt(item):
-            query = f"{item} price {location}"
-            results = shopper.search.search(query, max_results=6)
-            if not results:
-                results = shopper.search.search(f"buy {item} online {location}", max_results=6)
+            query = f"buy {item} online {location} price"
+            results = shopper.search.search(query, max_results=4)
             if results:
                 rec = shopper.vet(item, results, budget, currency, location, pain_point)
                 if rec:
