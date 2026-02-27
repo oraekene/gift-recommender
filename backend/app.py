@@ -425,12 +425,9 @@ class SerperSearch:
                 data = resp.json()
                 results = []
                 for item in data.get('shopping', [])[:max_results]:
-                    original_link = item.get('link', '')
-                    actual_link = extract_actual_product_url(original_link) if original_link else original_link
-                    
                     results.append({
                         'title': item.get('title', ''),
-                        'href': actual_link,
+                        'href': item.get('link', ''),
                         'body': f"{item.get('title', '')} — {item.get('price', 'Price unknown')}",
                         'price': item.get('price', ''),
                         'source': item.get('source', ''),
@@ -812,7 +809,6 @@ def analyze():
         # Brainstorm 3 gift ideas (practical, splurge, thoughtful) for the top pain point
         ideas = shopper.brainstorm(pain_text, location)
         
-        # Search and vet each strategy IN PARALLEL for speed
         def search_and_vet(strategy, item):
             query = f"{item} {location}"
             results = shopper.search.search(query, location=location, max_results=max_results)
@@ -823,6 +819,12 @@ def analyze():
                     rec['strategy'] = strategy
                     rec['pain_point'] = pain_text
                     rec['pain_score'] = pain_score
+                    
+                    # Extract the actual URL only for the chosen product
+                    mapped_url = rec.get('url')
+                    if mapped_url:
+                        rec['url'] = extract_actual_product_url(mapped_url)
+                        
                     return rec
             return None
         
