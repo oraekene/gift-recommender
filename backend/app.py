@@ -580,32 +580,32 @@ Return JSON: {{"practical": "...", "splurge": "...", "thoughtful": "..."}}"""
     def vet(self, item, results, budget, currency, location, pain_point):
         # Updated prompt: extract price FROM result data, don't guess
         shopping_results = [r for r in results if r.get('is_shopping_result')]
-        web_results = [r for r in results if not r.get('is_shopping_result')]
         
         price_instruction = (
-            "Extract the EXACT price shown in the result's 'price' field or 'body' text. "
-            "Do NOT guess or estimate a price if none is visible."
+            "Extract the EXACT price shown in the result. Do NOT guess or estimate a price if none is visible."
             if shopping_results else
             "If no specific price is visible in the body text, set price_guess to 'unknown'."
         )
         
         prompt = f"""The recipient is in {location} and struggling with: "{pain_point}"
-Select the best product under {budget} {currency} from these results:
+Select the best product over these results that fits a budget of roughly {budget} {currency} (do a rough conversion if prices are in local currency like Naira):
 {json.dumps(results[:4])}
 
 RULES:
-- url must be copied verbatim from the result's href field
+- 'url' MUST be the exact 'href' or 'link' from the result you select.
 - {price_instruction}
-- Reject results whose href contains: /search, /catalog/, query=, /category/
+- MUST return a product unless ALL results are completely irrelevant.
 
-Return JSON: {{"product": "Name", "price_guess": "exact price or unknown", "url": "exact href", 
-"reason": "warm 1-2 sentence explanation", "technical_reason": "analysis"}} or {{}} if nothing qualifies."""
+Return EXACTLY ONE JSON object: {{"product": "Name", "price_guess": "price", "url": "link", "reason": "A warm, natural 1-2 sentence description of how this helps."}}"""
         
         resp = self.kimi.generate(prompt)
         try:
             match = re.search(r'\{.*\}', resp.replace("\n", " "), re.DOTALL)
             rec = json.loads(match.group(0)) if match else {}
-            if rec.get('product') and rec.get('url'):
+            # Allow fallback if Kimi output "href" instead of "url"
+            mapped_url = rec.get('url') or rec.get('href') or rec.get('link')
+            if rec.get('product') and mapped_url:
+                rec['url'] = mapped_url
                 return rec
         except:
             pass
