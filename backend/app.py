@@ -10,6 +10,7 @@ import re
 import time
 import requests
 import uuid
+import urllib.parse
 import hmac
 import hashlib
 import logging
@@ -387,9 +388,11 @@ class SerperSearch:
                 data = resp.json()
                 results = []
                 for item in data.get('shopping', [])[:max_results]:
+                    raw_link = item.get('link', '')
+                    merchant_url = self._resolve_merchant_url(raw_link)  # ← resolves Google panel URLs
                     results.append({
                         'title': item.get('title', ''),
-                        'href': item.get('link', ''),
+                        'href': merchant_url,
                         'body': f"{item.get('title', '')} — {item.get('price', 'Price unknown')}",
                         'price': item.get('price', ''),
                         'source': item.get('source', ''),
@@ -433,6 +436,47 @@ class SerperSearch:
         except Exception as e:
             print(f"Serper web error: {e}")
         return []
+
+    def _resolve_merchant_url(self, url: str) -> str:
+        """
+        If Serper returns a Google Shopping panel URL instead of the merchant URL,
+        fetch the page and extract the real outbound 'Visit site' link.
+        Returns the original url unchanged if resolution fails or url is already a merchant URL.
+        """
+        if 'google.com' not in url:
+            return url  # Already a direct merchant URL, nothing to do
+        
+        headers = {
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/120.0.0.0 Safari/537.36'
+            ),
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            html = resp.text
+            
+            # Google embeds the merchant URL as /url?q=MERCHANT_URL in outbound links
+            matches = re.findall(r'/url\?q=(https?://[^&"\\<]+)', html)
+            for match in matches:
+                decoded = urllib.parse.unquote(match)
+                if 'google.com' not in decoded and 'googleadservices' not in decoded:
+                    print(f"  🔗 Resolved Google URL → {decoded[:80]}")
+                    return decoded
+            
+            # Fallback: look for adurl= param (paid shopping ads)
+            match = re.search(r'adurl=(https?://[^&"\\<]+)', html)
+            if match:
+                decoded = urllib.parse.unquote(match.group(1))
+                if 'google.com' not in decoded:
+                    return decoded
+                    
+        except Exception as e:
+            print(f"  ⚠️ URL resolution failed: {e}")
+        
+        return url  # Return original if resolution fails
 
     def search(self, query: str, location: str = '', max_results: int = 4) -> list:
         """
