@@ -416,15 +416,15 @@ class SerperSearch:
             if resp.status_code == 200:
                 data = resp.json()
                 results = []
-                for item in data.get('shopping', [])[:max_results]:
-                    # Extract direct product URL if it's a Google Shopping overlay
+                items = data.get('shopping', [])[:max_results]
+
+                def process_item(item):
                     link = item.get('link', '')
                     if 'google.com/search?ibp=oshop' in link:
                         extracted = self._extract_direct_url(link)
                         if extracted:
                             link = extracted
-                            
-                    results.append({
+                    return {
                         'title': item.get('title', ''),
                         'href': link,
                         'body': f"{item.get('title', '')} — {item.get('price', 'Price unknown')}",
@@ -432,7 +432,14 @@ class SerperSearch:
                         'source': item.get('source', ''),
                         'rating': item.get('rating', ''),
                         'is_shopping_result': True
-                    })
+                    }
+
+                # Run URL extractions in parallel to prevent Vercel/Render timeouts
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    futures = [executor.submit(process_item, item) for item in items]
+                    for future in futures:
+                        results.append(future.result())
+
                 return results
         except Exception as e:
             print(f"Serper shopping error: {e}")
@@ -653,6 +660,13 @@ Return EXACTLY ONE JSON object: {{"product": "Name", "price_guess": "price", "ur
             rec = json.loads(match.group(0)) if match else {}
             # Allow fallback if Kimi output "href" instead of "url"
             mapped_url = rec.get('url') or rec.get('href') or rec.get('link')
+            
+            # Map N/A prices to unknown for frontend handling
+            if 'price_guess' in rec and rec['price_guess']:
+                pg = str(rec['price_guess']).lower().strip()
+                if pg in ['n/a', 'na', 'unknown', 'none', 'null', '']:
+                    rec['price_guess'] = 'unknown'
+
             if rec.get('product') and mapped_url:
                 rec['url'] = mapped_url
                 return rec
