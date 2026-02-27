@@ -12,9 +12,6 @@ import requests
 import uuid
 import hmac
 import hashlib
-import urllib.request
-import urllib.parse
-from html import unescape
 import logging
 from logging.handlers import RotatingFileHandler
 
@@ -368,33 +365,6 @@ class SerperSearch:
                 return code
         return 'us'  # safe fallback
 
-    def _extract_direct_url(self, google_url: str) -> str:
-        """
-        Scrapes a Google Shopping ibp=oshop overlay URL to extract the
-        direct product page URL so users bypass the Google intermediary page.
-        """
-        try:
-            req = urllib.request.Request(
-                google_url, 
-                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
-            )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                html = resp.read().decode('utf-8', errors='ignore')
-                
-                # Find all potential absolute URLs inside the document
-                all_urls = re.findall(r'https?://(?:[a-zA-Z0-9\-]+\.)+[a-zA-Z]{2,}(?:/[^\s\"\'<>\\]*)?', html)
-                
-                for u in all_urls:
-                    u = urllib.parse.unquote(unescape(u))
-                    # Ignore Google and common schema/resource domains
-                    if not any(x in u for x in ['google.com', 'google.ng', 'gstatic.com', 'schema.org', 'w3.org', 'youtube.com']):
-                        # Extra safety check by parsing the raw netloc
-                        if 'google' not in urllib.parse.urlparse(u).netloc:
-                            return u
-        except Exception as e:
-            print(f"⚠️ Failed to extract direct URL from Google Shopping: {e}")
-        return ""
-
     def search_shopping(self, query: str, location: str, max_results: int = 4) -> list:
         """
         Query Google Shopping via Serper. Returns individual product listings
@@ -416,30 +386,16 @@ class SerperSearch:
             if resp.status_code == 200:
                 data = resp.json()
                 results = []
-                items = data.get('shopping', [])[:max_results]
-
-                def process_item(item):
-                    link = item.get('link', '')
-                    if 'google.com/search?ibp=oshop' in link:
-                        extracted = self._extract_direct_url(link)
-                        if extracted:
-                            link = extracted
-                    return {
+                for item in data.get('shopping', [])[:max_results]:
+                    results.append({
                         'title': item.get('title', ''),
-                        'href': link,
+                        'href': item.get('link', ''),
                         'body': f"{item.get('title', '')} — {item.get('price', 'Price unknown')}",
                         'price': item.get('price', ''),
                         'source': item.get('source', ''),
                         'rating': item.get('rating', ''),
                         'is_shopping_result': True
-                    }
-
-                # Run URL extractions in parallel to prevent Vercel/Render timeouts
-                with ThreadPoolExecutor(max_workers=4) as executor:
-                    futures = [executor.submit(process_item, item) for item in items]
-                    for future in futures:
-                        results.append(future.result())
-
+                    })
                 return results
         except Exception as e:
             print(f"Serper shopping error: {e}")
@@ -660,13 +616,6 @@ Return EXACTLY ONE JSON object: {{"product": "Name", "price_guess": "price", "ur
             rec = json.loads(match.group(0)) if match else {}
             # Allow fallback if Kimi output "href" instead of "url"
             mapped_url = rec.get('url') or rec.get('href') or rec.get('link')
-            
-            # Map N/A prices to unknown for frontend handling
-            if 'price_guess' in rec and rec['price_guess']:
-                pg = str(rec['price_guess']).lower().strip()
-                if pg in ['n/a', 'na', 'unknown', 'none', 'null', '']:
-                    rec['price_guess'] = 'unknown'
-
             if rec.get('product') and mapped_url:
                 rec['url'] = mapped_url
                 return rec
