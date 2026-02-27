@@ -14,8 +14,6 @@ import hmac
 import hashlib
 import logging
 from logging.handlers import RotatingFileHandler
-from bs4 import BeautifulSoup
-from urllib.parse import urlparse, parse_qs
 
 # Set up rotating file logger for analysis data
 log_formatter = logging.Formatter('%(message)s')
@@ -320,42 +318,6 @@ def check_rate_limit(user_id, tier='free'):
         return False, retry_after
     
     return True, 0
-
-def extract_actual_product_url(shopping_url):
-    """
-    Extracts the actual product URL from a Google Shopping redirect URL.
-    Fetches the page, finds the 'Visit site' link, and extracts it.
-    """
-    if "ibp=oshop" not in shopping_url and "/url?q=" not in shopping_url:
-        return shopping_url
-        
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
-    try:
-        response = requests.get(shopping_url, headers=headers, timeout=5)
-        if response.status_code != 200:
-            return shopping_url
-            
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        for a_tag in soup.find_all('a', href=True):
-            href = a_tag['href']
-            
-            if "/url?q=" in href:
-                if href.startswith('/'):
-                    href = "https://www.google.com" + href
-                    
-                parsed_url = urlparse(href)
-                query_params = parse_qs(parsed_url.query)
-                
-                if 'q' in query_params:
-                    return query_params['q'][0]
-    except Exception as e:
-        print(f"Error extracting URL: {e}")
-        
-    return shopping_url
     
 # Search and Analysis Classes
 class SerperSearch:
@@ -809,6 +771,7 @@ def analyze():
         # Brainstorm 3 gift ideas (practical, splurge, thoughtful) for the top pain point
         ideas = shopper.brainstorm(pain_text, location)
         
+        # Search and vet each strategy IN PARALLEL for speed
         def search_and_vet(strategy, item):
             query = f"{item} {location}"
             results = shopper.search.search(query, location=location, max_results=max_results)
@@ -819,12 +782,6 @@ def analyze():
                     rec['strategy'] = strategy
                     rec['pain_point'] = pain_text
                     rec['pain_score'] = pain_score
-                    
-                    # Extract the actual URL only for the chosen product
-                    mapped_url = rec.get('url')
-                    if mapped_url:
-                        rec['url'] = extract_actual_product_url(mapped_url)
-                        
                     return rec
             return None
         
