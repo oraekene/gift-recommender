@@ -12,6 +12,9 @@ import requests
 import uuid
 import hmac
 import hashlib
+import urllib.request
+import urllib.parse
+from html import unescape
 import logging
 from logging.handlers import RotatingFileHandler
 
@@ -365,6 +368,33 @@ class SerperSearch:
                 return code
         return 'us'  # safe fallback
 
+    def _extract_direct_url(self, google_url: str) -> str:
+        """
+        Scrapes a Google Shopping ibp=oshop overlay URL to extract the
+        direct product page URL so users bypass the Google intermediary page.
+        """
+        try:
+            req = urllib.request.Request(
+                google_url, 
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                html = resp.read().decode('utf-8', errors='ignore')
+                
+                # Find all potential absolute URLs inside the document
+                all_urls = re.findall(r'https?://(?:[a-zA-Z0-9\-]+\.)+[a-zA-Z]{2,}(?:/[^\s\"\'<>\\]*)?', html)
+                
+                for u in all_urls:
+                    u = urllib.parse.unquote(unescape(u))
+                    # Ignore Google and common schema/resource domains
+                    if not any(x in u for x in ['google.com', 'google.ng', 'gstatic.com', 'schema.org', 'w3.org', 'youtube.com']):
+                        # Extra safety check by parsing the raw netloc
+                        if 'google' not in urllib.parse.urlparse(u).netloc:
+                            return u
+        except Exception as e:
+            print(f"⚠️ Failed to extract direct URL from Google Shopping: {e}")
+        return ""
+
     def search_shopping(self, query: str, location: str, max_results: int = 4) -> list:
         """
         Query Google Shopping via Serper. Returns individual product listings
@@ -387,9 +417,16 @@ class SerperSearch:
                 data = resp.json()
                 results = []
                 for item in data.get('shopping', [])[:max_results]:
+                    # Extract direct product URL if it's a Google Shopping overlay
+                    link = item.get('link', '')
+                    if 'google.com/search?ibp=oshop' in link:
+                        extracted = self._extract_direct_url(link)
+                        if extracted:
+                            link = extracted
+                            
                     results.append({
                         'title': item.get('title', ''),
-                        'href': item.get('link', ''),
+                        'href': link,
                         'body': f"{item.get('title', '')} — {item.get('price', 'Price unknown')}",
                         'price': item.get('price', ''),
                         'source': item.get('source', ''),
