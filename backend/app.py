@@ -12,6 +12,16 @@ import requests
 import uuid
 import hmac
 import hashlib
+import logging
+from logging.handlers import RotatingFileHandler
+
+# Set up rotating file logger for analysis data
+log_formatter = logging.Formatter('%(message)s')
+log_handler = RotatingFileHandler('analysis_logs.jsonl', maxBytes=5 * 1024 * 1024, backupCount=5)
+log_handler.setFormatter(log_formatter)
+analysis_logger = logging.getLogger('AnalysisLogger')
+analysis_logger.setLevel(logging.INFO)
+analysis_logger.addHandler(log_handler)
 from cryptography.fernet import Fernet
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import stripe
@@ -426,17 +436,18 @@ class SerperSearch:
 
     def search(self, query: str, location: str = '', max_results: int = 4) -> list:
         """
-        Try Shopping first. If fewer than 2 results come back, fall back to web.
-        This ensures the widest global coverage while prioritising product URLs.
+        Try Shopping first. If at least 1 result comes back, avoid wasting an API call on web fallback.
+        This strongly prevents making 9+ API calls per session unless absolutely necessary.
         """
         shopping = self.search_shopping(query, location, max_results)
-        if len(shopping) >= 2:
-            print(f"  🛒 Shopping results: {len(shopping)} products")
+        if len(shopping) >= 1:
+            print(f"  🛒 [SERPER] Query '{query}': Found {len(shopping)} Shopping results (No fallback needed)")
             return shopping
 
-        print(f"  ⚠️  Shopping thin ({len(shopping)} results), falling back to web search")
+        print(f"  ⚠️  [SERPER] Query '{query}': Shopping empty. Falling back to Web search...")
         web = self.search_web(query, location, max_results)
-        return shopping + web  # prepend any shopping we did get
+        print(f"  🌐 [SERPER] Query '{query}': Found {len(web)} Web results")
+        return web
 
 # class GeminiClient:
     # def __init__(self, api_key):
@@ -595,8 +606,9 @@ RULES:
 - 'url' MUST be the exact 'href' or 'link' from the result you select.
 - {price_instruction}
 - MUST return a product unless ALL results are completely irrelevant.
+- DO NOT select products if their snippet/body text explicitly says "out of stock", "unavailable", or "sold out".
 
-Return EXACTLY ONE JSON object: {{"product": "Name", "price_guess": "price", "url": "link", "reason": "A warm, natural 1-2 sentence description of how this helps."}}"""
+Return EXACTLY ONE JSON object: {{"product": "Name", "price_guess": "price", "url": "link", "reason": "A warm, natural 1-2 sentence description of how this helps", "technical_reason": "Brief technical explanation of your choice and price logic"}}"""
         
         resp = self.kimi.generate(prompt)
         try:
@@ -816,6 +828,19 @@ def analyze():
     )
     db.session.add(analysis)
     db.session.flush()  # Get analysis.id
+
+    # Append to rotating JSONL file log
+    log_entry = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "user_id": user.id,
+        "recipient": recipient,
+        "location": location,
+        "budget": f"{budget} {currency}",
+        "search_count": total_searches,
+        "pains": pains,
+        "gifts_with_technical_reasons": gifts
+    }
+    analysis_logger.info(json.dumps(log_entry))
 
     # Update file with analysis reference
     if file_id:
